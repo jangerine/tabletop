@@ -6,7 +6,7 @@
   <title>멀티 보드게임 시뮬레이터</title>
   <style>
     * {
-      touch-action: none;
+      touch-action: manipulation;
       user-select: none;
       -webkit-user-select: none;
       box-sizing: border-box;
@@ -46,7 +46,7 @@
     #mode-btn.camera-mode { background: #059669; }
     #onecard-btn { background: #eab308; color: #000; display: none; }
 
-    /* 게임 선택 드롭다운 모달 */
+    /* 게임 선택 모달 */
     #game-menu-modal {
       display: none;
       position: absolute;
@@ -83,7 +83,7 @@
     }
     .menu-item:hover, .menu-item:active { background: #3f3f46; }
 
-    /* 원카드 전용 UI */
+    /* 원카드 전용 상태창 */
     #status-bar {
       position: absolute;
       top: 60px;
@@ -98,33 +98,55 @@
       font-weight: bold;
       z-index: 10;
       display: none;
+      text-align: center;
     }
+
+    /* 카드 스크롤 & 화면 초과 대응 핸드 레이아웃 */
     #hand-container {
       position: absolute;
       bottom: 12px;
-      left: 0; right: 0;
-      height: 120px;
+      left: 0;
+      right: 0;
+      height: 130px;
       display: none;
       justify-content: center;
       align-items: flex-end;
-      padding: 0 10px;
+      padding: 0 20px;
       z-index: 20;
       overflow-x: auto;
+      overflow-y: hidden;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
     }
+    #hand-container::-webkit-scrollbar {
+      height: 6px;
+    }
+    #hand-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+    }
+
     .card-ui {
-      width: 65px; height: 95px;
+      width: 60px;
+      height: 90px;
       background: white;
       border-radius: 8px;
-      margin: 0 -10px;
+      margin: 0 -12px; /* 서로 겹쳐서 축소 */
       box-shadow: -2px 0 8px rgba(0,0,0,0.4);
-      display: flex; flex-direction: column;
+      display: inline-flex;
+      flex-direction: column;
       justify-content: space-between;
-      padding: 6px; font-weight: bold;
+      padding: 6px;
+      font-weight: bold;
       cursor: pointer;
       flex-shrink: 0;
       border: 2px solid #cbd5e1;
+      transition: transform 0.15s ease, margin 0.15s ease;
     }
-    .card-ui:active { transform: translateY(-15px); }
+    .card-ui:hover, .card-ui:active {
+      transform: translateY(-20px) scale(1.1);
+      z-index: 30;
+    }
     .card-ui .card-value { font-size: 16px; }
     .card-ui .card-suit { font-size: 22px; text-align: center; }
 
@@ -192,7 +214,6 @@
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 바닥 테이블
     const tableGeo = new THREE.BoxGeometry(14, 0.4, 14);
     const tableMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 });
     const tableMesh = new THREE.Mesh(tableGeo, tableMat);
@@ -200,7 +221,7 @@
     tableMesh.receiveShadow = true;
     scene.add(tableMesh);
 
-    // ===== 2. Cannon.js 물리 세계 설정 (젠가/체크보드용) =====
+    // ===== 2. Cannon.js 물리 설정 =====
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
     world.solver.iterations = 10;
@@ -212,14 +233,13 @@
     tableBody.position.set(0, -0.2, 0);
     world.addBody(tableBody);
 
-    // ===== 3. 게임 상태 변수 =====
+    // ===== 3. 상태 데이터 =====
     let currentGame = 'onecard';
-    const objects = {}; // 젠가/체크보드 오브젝트
+    const objects = {};
 
     const jengaGeo = new THREE.BoxGeometry(3, 0.6, 1);
     const jengaShape = new CANNON.Box(new CANNON.Vec3(1.48, 0.29, 0.48));
 
-    // 원카드 3D 메쉬
     let deckMesh, discardMesh;
     const cardGeo = new THREE.BoxGeometry(1.6, 0.02, 2.4);
 
@@ -233,7 +253,7 @@
       if (discardMesh) { scene.remove(discardMesh); discardMesh = null; }
     }
 
-    // ===== 4. 젠가 및 물리 오브젝트 생성 =====
+    // ===== 4. 젠가 및 기물 생성 =====
     function createPiece(data) {
       let mesh, body;
       if (data.type === 'jenga_block') {
@@ -256,7 +276,7 @@
       objects[data.id] = { mesh, body };
     }
 
-    // ===== 5. 원카드 3D 카드 텍스처 =====
+    // ===== 5. 3D 카드 텍스처 =====
     function createCardTexture(suit, value, colorStr) {
       const canvas = document.createElement('canvas');
       canvas.width = 256; canvas.height = 384;
@@ -285,7 +305,7 @@
       scene.add(deckMesh);
     }
 
-    // ===== 6. 소켓 이벤트 수신 =====
+    // ===== 6. 소켓 통신 처리 =====
     socket.on('init-game-mode', (data) => {
       currentGame = data.game;
       clearAll();
@@ -359,7 +379,7 @@
       });
     });
 
-    // ===== 7. 인터랙션 및 터치 처리 =====
+    // ===== 7. 터치 이벤트 =====
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
     let lastTouchPos = new THREE.Vector2();
@@ -415,7 +435,7 @@
 
     window.addEventListener('pointerup', () => { selectedObject = null; });
 
-    // UI 이벤트
+    // UI 버튼 제어
     let isCameraMode = false;
     document.getElementById('menu-btn').addEventListener('click', () => {
       const modal = document.getElementById('game-menu-modal');
