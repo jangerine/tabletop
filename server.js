@@ -92,4 +92,6 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => console.log(`TTS 서버 실행 중: 포트 ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`TTS 서버 실행 중: 포트 ${PORT}`);
+});
