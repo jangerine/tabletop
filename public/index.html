@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Tabletop Simulator Style Flying Card</title>
+  <title>Tabletop Simulator Style Full Physics & 3D Flip Card</title>
   <style>
     body {
       margin: 0;
       overflow: hidden;
-      background-color: #1a1a1a;
+      background-color: #0f172a;
       touch-action: none; /* 모바일 스크롤 및 바운스 방지 */
       user-select: none;
     }
@@ -18,13 +18,18 @@
       left: 50%;
       transform: translateX(-50%);
       color: #ffffff;
-      font-family: sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 14px;
-      background: rgba(0, 0, 0, 0.6);
-      padding: 8px 16px;
+      background: rgba(0, 0, 0, 0.75);
+      padding: 12px 24px;
       border-radius: 20px;
       pointer-events: none;
       text-align: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      line-height: 1.5;
+    }
+    #info b {
+      color: #38bdf8;
     }
   </style>
   <!-- Three.js CDN -->
@@ -32,85 +37,129 @@
 </head>
 <body>
 
-  <div id="info">마우스/터치로 카드를 드래그해 보세요! (TTS 플라잉 효과)</div>
+  <div id="info">
+    🖱️ <b>드래그:</b> 카드 이동 (관성 틸트 & 높이 들림)<br>
+    🍃 <b>드롭:</b> 손을 놓으면 속도 감쇄 및 포물선 착지<br>
+    👆 <b>더블 클릭 / 터치</b> 또는 <b>[F] 키:</b> 공중 3D Flip 뒤집기
+  </div>
 
   <script>
     // 1. 씬, 카메라, 렌더러 설정
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x22242b);
+    scene.background = new THREE.Color(0x0f172a);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, -6, 8);
+    camera.position.set(0, -7, 8);
     camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
 
     // 2. 조명 설정
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
     dirLight.position.set(5, -5, 10);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 1024;
     dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 25;
     scene.add(dirLight);
 
     // 3. 바닥 판 (Table Board)
-    const boardGeo = new THREE.PlaneGeometry(12, 10);
-    const boardMat = new THREE.MeshStandardMaterial({ color: 0x1e3a2b, roughness: 0.8 });
+    const boardGeo = new THREE.PlaneGeometry(14, 10);
+    const boardMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
     const board = new THREE.Mesh(boardGeo, boardMat);
     board.receiveShadow = true;
     scene.add(board);
 
-    // 4. 3D 카드 생성
+    // 4. 앞/뒷면 텍스처 생성 (Canvas 이용)
+    function createFrontTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 384;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 384);
+      ctx.lineWidth = 10; ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(5, 5, 246, 374);
+      ctx.fillStyle = '#dc2626'; ctx.font = 'bold 44px sans-serif'; ctx.fillText('A', 20, 55);
+      ctx.font = 'bold 72px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('♠', 128, 210);
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function createBackTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 384;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, 256, 384);
+      ctx.lineWidth = 8; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(8, 8, 240, 368);
+      ctx.fillStyle = '#991b1b';
+      for(let i=20; i<240; i+=20) {
+        for(let j=20; j<360; j+=20) {
+          ctx.fillRect(i, j, 10, 10);
+        }
+      }
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // 5. 3D 카드 메쉬 생성
     const cardGeo = new THREE.BoxGeometry(1.6, 2.4, 0.02);
     const cardMat = [
-      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 우
-      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 좌
-      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 상
-      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 하
-      new THREE.MeshStandardMaterial({ color: 0xffffff }), // 앞면
-      new THREE.MeshStandardMaterial({ color: 0xb22222 })  // 뒷면 (레드)
+      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 우
+      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 좌
+      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 상
+      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 하
+      new THREE.MeshStandardMaterial({ map: createFrontTexture(), roughness: 0.3 }), // 앞면
+      new THREE.MeshStandardMaterial({ map: createBackTexture(), roughness: 0.3 })   // 뒷면
     ];
     const cardMesh = new THREE.Mesh(cardGeo, cardMat);
     cardMesh.castShadow = true;
     cardMesh.receiveShadow = true;
     scene.add(cardMesh);
 
-    // 5. Flying Card 물리 제어 클래스
+    // 6. Flying Physics & 3D Flip 제어 클래스
     class FlyingCardPhysics {
       constructor(mesh) {
         this.mesh = mesh;
         this.isDragging = false;
         
         this.pos = new THREE.Vector3(0, 0, 0.01);
-        this.prevPos = new THREE.Vector2(0, 0);
         this.velocity = new THREE.Vector2(0, 0);
-        this.rot = new THREE.Euler(0, 0, 0);
+        
+        // 회전 관리 (기본 상태 Y축 회전 + 이동 관성 틸트)
+        this.baseRotY = 0; // 0: 앞면, Math.PI: 뒷면
+        this.tiltRot = new THREE.Euler(0, 0, 0);
 
+        // 드롭 & 플라잉 착지 물리
         this.targetZ = 0.01;
         this.isFlying = false;
         this.flyProgress = 0;
-        this.flyDuration = 0.4;
+        this.flyDuration = 0.45;
         this.startPos = new THREE.Vector3();
         this.targetPos = new THREE.Vector3();
+
+        // 3D Flip 애니메이션
+        this.isFlipping = false;
+        this.flipProgress = 0;
+        this.flipDuration = 0.4;
+        this.startRotY = 0;
+        this.targetRotY = 0;
       }
 
-      onDragStart(hitPoint) {
+      onDragStart() {
         this.isDragging = true;
         this.isFlying = false;
-        this.targetZ = 1.2; // TTS 특유의 공중 들림 (Lift)
+        this.targetZ = 1.2; // 드래그 시 카드를 공중으로 들어올림
       }
 
       onDragMove(targetWorldPos) {
         if (!this.isDragging) return;
 
-        // 드래그 속도 계산 (관성 기울임용)
+        // 속도 측정 (관성 틸트 계산용)
         this.velocity.x = targetWorldPos.x - this.pos.x;
         this.velocity.y = targetWorldPos.y - this.pos.y;
 
@@ -118,32 +167,70 @@
         this.pos.y = targetWorldPos.y;
       }
 
-      onDragEnd(targetX = 0, targetY = 0, targetZ = 0.01) {
+      onDragEnd() {
+        if (!this.isDragging) return;
         this.isDragging = false;
         this.isFlying = true;
         this.flyProgress = 0;
 
         this.startPos.copy(this.pos);
-        this.targetPos.set(targetX, targetY, targetZ);
+        // 던진 속도 관성을 일부 반영하여 착지 지점 계산
+        const throwX = THREE.MathUtils.clamp(this.pos.x + this.velocity.x * 2.5, -6, 6);
+        const throwY = THREE.MathUtils.clamp(this.pos.y + this.velocity.y * 2.5, -4, 4);
+        
+        this.targetPos.set(throwX, throwY, 0.01);
+      }
+
+      // 3D Flip (공중 뒤집기) 발동
+      flip() {
+        if (this.isFlipping) return; // 이미 뒤집히는 중이면 중복 실행 방지
+        
+        this.isFlipping = true;
+        this.flipProgress = 0;
+        this.startRotY = this.baseRotY;
+        this.targetRotY = this.baseRotY + Math.PI; // 180도 회전
+
+        // 드래그 중이 아니거나 정지 상태일 때 Flip 시 포물선 점프 연출 유발
+        if (!this.isDragging && !this.isFlying) {
+          this.isFlying = true;
+          this.flyProgress = 0;
+          this.startPos.copy(this.pos);
+          this.targetPos.copy(this.pos);
+        }
       }
 
       update(delta) {
-        // [A] 드래그 중: 공중 높이 보간 및 속도 기반 틸트(기울어짐)
+        // --- [1] 3D Flip (뒤집기) 회전 연출 ---
+        if (this.isFlipping) {
+          this.flipProgress += delta / this.flipDuration;
+          if (this.flipProgress >= 1) {
+            this.flipProgress = 1;
+            this.isFlipping = false;
+            this.baseRotY = this.targetRotY % (Math.PI * 2);
+          }
+          // Ease-InOut 곡선으로 부드러운 회전
+          const t = this.flipProgress;
+          const easeT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+          this.baseRotY = THREE.MathUtils.lerp(this.startRotY, this.targetRotY, easeT);
+        }
+
+        // --- [2] 드래그 상태 물리 ---
         if (this.isDragging) {
+          // Z축 높이 부드럽게 상승
           this.pos.z += (this.targetZ - this.pos.z) * 0.2;
 
-          // 이동 속도에 비례해서 카드가 기울어짐 (TTS 관성 효과)
-          const targetRotX = -this.velocity.y * 0.8;
-          const targetRotY =  this.velocity.x * 0.8;
-          const targetRotZ = -this.velocity.x * 0.3;
+          // 이동 속도에 비례한 관성 틸트 (기울어짐)
+          const targetTiltX = -this.velocity.y * 0.8;
+          const targetTiltY =  this.velocity.x * 0.8;
+          const targetTiltZ = -this.velocity.x * 0.3;
 
-          this.rot.x += (targetRotX - this.rot.x) * 0.2;
-          this.rot.y += (targetRotY - this.rot.y) * 0.2;
-          this.rot.z += (targetRotZ - this.rot.z) * 0.2;
+          this.tiltRot.x += (targetTiltX - this.tiltRot.x) * 0.2;
+          this.tiltRot.y += (targetTiltY - this.tiltRot.y) * 0.2;
+          this.tiltRot.z += (targetTiltZ - this.tiltRot.z) * 0.2;
 
           this.velocity.multiplyScalar(0.7); // 속도 감쇄
         } 
-        // [B] 손을 놓았을 때: 목표 지점으로 포물선을 그리며 비행
+        // --- [3] 손을 놓았을 때 포물선 비행 & 착지 물리 ---
         else if (this.isFlying) {
           this.flyProgress += delta / this.flyDuration;
           if (this.flyProgress >= 1) {
@@ -152,35 +239,41 @@
           }
 
           const t = this.flyProgress;
-          // Ease-Out-Cubic 감속 적용
-          const easeT = 1 - Math.pow(1 - t, 3);
+          const easeT = 1 - Math.pow(1 - t, 3); // Ease-Out-Cubic
 
           this.pos.x = THREE.MathUtils.lerp(this.startPos.x, this.targetPos.x, easeT);
           this.pos.y = THREE.MathUtils.lerp(this.startPos.y, this.targetPos.y, easeT);
 
-          // 비행 중 공중 포물선 (Z축 높이 peak)
-          const arcHeight = Math.sin(t * Math.PI) * 1.0;
+          // 비행 피크 높이 (Flip 중일 때는 카드가 더 높게 뜸)
+          const peakHeight = this.isFlipping ? 1.8 : 0.8;
+          const arcHeight = Math.sin(t * Math.PI) * peakHeight;
           this.pos.z = THREE.MathUtils.lerp(this.startPos.z, this.targetPos.z, easeT) + arcHeight;
 
-          // 비행 중 회전 평평하게 복원
-          this.rot.x += (0 - this.rot.x) * 0.2;
-          this.rot.y += (0 - this.rot.y) * 0.2;
-          this.rot.z += (0 - this.rot.z) * 0.2;
+          // 착지 시 기울어짐 복원
+          this.tiltRot.x += (0 - this.tiltRot.x) * 0.2;
+          this.tiltRot.y += (0 - this.tiltRot.y) * 0.2;
+          this.tiltRot.z += (0 - this.tiltRot.z) * 0.2;
         }
 
-        // Mesh 최종 반용
+        // 위치 적용
         this.mesh.position.copy(this.pos);
-        this.mesh.rotation.copy(this.rot);
+
+        // 기본 뒤집기 회전(Y축)과 드래그 관성 틸트를 결합한 쿼터니언 계산
+        const qBase = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.baseRotY);
+        const qTilt = new THREE.Quaternion().setFromEuler(this.tiltRot);
+        this.mesh.quaternion.copy(qTilt.multiply(qBase));
       }
     }
 
     const cardPhysics = new FlyingCardPhysics(cardMesh);
 
-    // 6. 마우스/터치 레이캐스팅 및 인터랙션
+    // 7. 레이캐스팅 & 인터랙션 처리
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Z축 직교 드래그 평면
+    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
     const planeIntersection = new THREE.Vector3();
+
+    let lastTapTime = 0; // 더블 터치/클릭 감지용
 
     function getPointerPos(e) {
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -195,7 +288,16 @@
       const intersects = raycaster.intersectObject(cardMesh);
 
       if (intersects.length > 0) {
-        cardPhysics.onDragStart();
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTapTime;
+
+        // 300ms 이내 연속 클릭/터치 시 더블클릭 판정 -> 3D Flip 발동
+        if (tapLength < 300 && tapLength > 0) {
+          cardPhysics.flip();
+        } else {
+          cardPhysics.onDragStart();
+        }
+        lastTapTime = currentTime;
       }
     }
 
@@ -204,7 +306,6 @@
       getPointerPos(e);
       raycaster.setFromCamera(mouse, camera);
 
-      // 드래그 평면과의 교차점 좌표 추출
       if (raycaster.ray.intersectPlane(dragPlane, planeIntersection)) {
         cardPhysics.onDragMove(planeIntersection);
       }
@@ -212,30 +313,35 @@
 
     function onPointerUp() {
       if (cardPhysics.isDragging) {
-        // 손을 놓으면 현재 위치 부근 또는 목표 지점으로 비행 착지
-        cardPhysics.onDragEnd(cardPhysics.pos.x, cardPhysics.pos.y, 0.01);
+        cardPhysics.onDragEnd();
       }
     }
 
-    // 이벤트 리스너 등록 (PC/모바일 통합)
+    // 키보드 'F' 키 입력으로 뒤집기
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'f' || e.key === 'F' || e.key === 'ㄹ') {
+        cardPhysics.flip();
+      }
+    });
+
+    // 이벤트 리스너 등록
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
 
-    // 창 크기 변경 대응
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // 7. 메인 렌더 루프
+    // 8. 메인 렌더 루프
     const clock = new THREE.Clock();
     function animate() {
       requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
-      // 카드 물리 및 비행 연출 갱신
+      // 물리 업데이트 (관성, 드롭, 틸트, 3D Flip 결합)
       cardPhysics.update(delta);
 
       renderer.render(scene, camera);
