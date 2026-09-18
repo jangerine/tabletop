@@ -2,93 +2,46 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Tabletop Simulator Web</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Tabletop Simulator Style Flying Card</title>
   <style>
-    * {
-      touch-action: none;
-      user-select: none;
-      -webkit-user-select: none;
-      box-sizing: border-box;
-    }
     body {
       margin: 0;
       overflow: hidden;
-      background-color: #0f172a;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #1a1a1a;
+      touch-action: none; /* 모바일 스크롤 및 바운스 방지 */
+      user-select: none;
     }
-    #ui-container {
+    #info {
       position: absolute;
-      top: 12px; left: 12px; right: 12px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      z-index: 10;
+      top: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #ffffff;
+      font-family: sans-serif;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 8px 16px;
+      border-radius: 20px;
       pointer-events: none;
-    }
-    .btn-group { pointer-events: auto; display: flex; gap: 8px; }
-    .btn {
-      background: #2563eb; color: white; border: none;
-      padding: 10px 14px; border-radius: 12px; font-size: 13px;
-      font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-      cursor: pointer; backdrop-filter: blur(4px);
-    }
-    .btn:active { transform: scale(0.95); }
-    #flip-btn { background: #8b5cf6; }
-    #dice-btn { background: #f59e0b; }
-    #reset-btn { background: #dc2626; }
-    #mode-btn.camera-mode { background: #059669; }
-
-    /* 컨트롤 안내 툴팁 */
-    #help-panel {
-      position: absolute;
-      bottom: 12px; left: 12px;
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: white; padding: 10px 14px; border-radius: 10px;
-      font-size: 12px; pointer-events: none; z-index: 10;
-    }
-
-    #toast {
-      position: absolute; top: 70px; left: 50%;
-      transform: translateX(-50%); background: #10b981;
-      color: white; padding: 8px 18px; border-radius: 20px;
-      font-size: 14px; font-weight: bold; display: none; z-index: 100;
+      text-align: center;
     }
   </style>
+  <!-- Three.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
-  <div id="ui-container">
-    <div class="btn-group">
-      <button id="dice-btn" class="btn">🎲 주사위 굴리기</button>
-      <button id="flip-btn" class="btn">🔄 기물/카드 뒤집기</button>
-      <button id="reset-btn" class="btn">💥 판 초기화 (Table Flip)</button>
-    </div>
-    <div class="btn-group">
-      <button id="mode-btn" class="btn">카메라 시점 이동</button>
-    </div>
-  </div>
 
-  <div id="help-panel">
-    🖱️ <b>조작법:</b> 물체 클릭/터치 후 드래그하여 이동 | <b>카메라 버튼:</b> 시점 조작 전환
-  </div>
-
-  <div id="toast"></div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <div id="info">마우스/터치로 카드를 드래그해 보세요! (TTS 플라잉 효과)</div>
 
   <script>
-    const socket = io();
-
-    // ===== 1. Three.js 설정 =====
+    // 1. 씬, 카메라, 렌더러 설정
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f172a);
+    scene.background = new THREE.Color(0x22242b);
 
-    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 12, 12);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, -6, 8);
+    camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -96,209 +49,199 @@
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableRotate = false; // 기본은 물체 조작 모드
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    // 2. 조명 설정
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    dirLight.position.set(10, 20, 10);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(5, -5, 10);
     dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
     scene.add(dirLight);
 
-    // 보드 테이블 생성
-    const tableGeo = new THREE.BoxGeometry(16, 0.4, 16);
-    const tableMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 });
-    const tableMesh = new THREE.Mesh(tableGeo, tableMat);
-    tableMesh.position.y = -0.2;
-    tableMesh.receiveShadow = true;
-    scene.add(tableMesh);
+    // 3. 바닥 판 (Table Board)
+    const boardGeo = new THREE.PlaneGeometry(12, 10);
+    const boardMat = new THREE.MeshStandardMaterial({ color: 0x1e3a2b, roughness: 0.8 });
+    const board = new THREE.Mesh(boardGeo, boardMat);
+    board.receiveShadow = true;
+    scene.add(board);
 
-    // ===== 2. Cannon.js 물리 엔진 설정 =====
-    const world = new CANNON.World();
-    world.gravity.set(0, -9.82, 0);
+    // 4. 3D 카드 생성
+    const cardGeo = new THREE.BoxGeometry(1.6, 2.4, 0.02);
+    const cardMat = [
+      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 우
+      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 좌
+      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 상
+      new THREE.MeshStandardMaterial({ color: 0x333333 }), // 하
+      new THREE.MeshStandardMaterial({ color: 0xffffff }), // 앞면
+      new THREE.MeshStandardMaterial({ color: 0xb22222 })  // 뒷면 (레드)
+    ];
+    const cardMesh = new THREE.Mesh(cardGeo, cardMat);
+    cardMesh.castShadow = true;
+    cardMesh.receiveShadow = true;
+    scene.add(cardMesh);
 
-    const tableBody = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(8, 0.2, 8)) });
-    tableBody.position.set(0, -0.2, 0);
-    world.addBody(tableBody);
+    // 5. Flying Card 물리 제어 클래스
+    class FlyingCardPhysics {
+      constructor(mesh) {
+        this.mesh = mesh;
+        this.isDragging = false;
+        
+        this.pos = new THREE.Vector3(0, 0, 0.01);
+        this.prevPos = new THREE.Vector2(0, 0);
+        this.velocity = new THREE.Vector2(0, 0);
+        this.rot = new THREE.Euler(0, 0, 0);
 
-    // ===== 3. 오브젝트 생성 & 관리 =====
-    const objects = {};
-    let selectedObjId = null;
-
-    // 기물 메쉬 생성기
-    function createPhysicsObject(data) {
-      let geo, shape;
-      if (data.type === 'dice') {
-        geo = new THREE.BoxGeometry(1, 1, 1);
-        shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
-      } else if (data.type === 'token') {
-        geo = new THREE.CylinderGeometry(0.6, 0.6, 0.3, 32);
-        shape = new CANNON.Cylinder(0.6, 0.6, 0.3, 16);
-      } else { // 기본 블록/카드
-        geo = new THREE.BoxGeometry(1.2, 0.2, 1.8);
-        shape = new CANNON.Box(new CANNON.Vec3(0.6, 0.1, 0.9));
+        this.targetZ = 0.01;
+        this.isFlying = false;
+        this.flyProgress = 0;
+        this.flyDuration = 0.4;
+        this.startPos = new THREE.Vector3();
+        this.targetPos = new THREE.Vector3();
       }
 
-      const mat = new THREE.MeshStandardMaterial({ color: data.color || 0x3b82f6 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      onDragStart(hitPoint) {
+        this.isDragging = true;
+        this.isFlying = false;
+        this.targetZ = 1.2; // TTS 특유의 공중 들림 (Lift)
+      }
 
-      const body = new CANNON.Body({ mass: 0.5, shape });
-      body.position.set(data.x, data.y, data.z);
-      world.addBody(body);
+      onDragMove(targetWorldPos) {
+        if (!this.isDragging) return;
 
-      mesh.userData = { id: data.id, type: data.type };
-      scene.add(mesh);
-      objects[data.id] = { mesh, body };
+        // 드래그 속도 계산 (관성 기울임용)
+        this.velocity.x = targetWorldPos.x - this.pos.x;
+        this.velocity.y = targetWorldPos.y - this.pos.y;
+
+        this.pos.x = targetWorldPos.x;
+        this.pos.y = targetWorldPos.y;
+      }
+
+      onDragEnd(targetX = 0, targetY = 0, targetZ = 0.01) {
+        this.isDragging = false;
+        this.isFlying = true;
+        this.flyProgress = 0;
+
+        this.startPos.copy(this.pos);
+        this.targetPos.set(targetX, targetY, targetZ);
+      }
+
+      update(delta) {
+        // [A] 드래그 중: 공중 높이 보간 및 속도 기반 틸트(기울어짐)
+        if (this.isDragging) {
+          this.pos.z += (this.targetZ - this.pos.z) * 0.2;
+
+          // 이동 속도에 비례해서 카드가 기울어짐 (TTS 관성 효과)
+          const targetRotX = -this.velocity.y * 0.8;
+          const targetRotY =  this.velocity.x * 0.8;
+          const targetRotZ = -this.velocity.x * 0.3;
+
+          this.rot.x += (targetRotX - this.rot.x) * 0.2;
+          this.rot.y += (targetRotY - this.rot.y) * 0.2;
+          this.rot.z += (targetRotZ - this.rot.z) * 0.2;
+
+          this.velocity.multiplyScalar(0.7); // 속도 감쇄
+        } 
+        // [B] 손을 놓았을 때: 목표 지점으로 포물선을 그리며 비행
+        else if (this.isFlying) {
+          this.flyProgress += delta / this.flyDuration;
+          if (this.flyProgress >= 1) {
+            this.flyProgress = 1;
+            this.isFlying = false;
+          }
+
+          const t = this.flyProgress;
+          // Ease-Out-Cubic 감속 적용
+          const easeT = 1 - Math.pow(1 - t, 3);
+
+          this.pos.x = THREE.MathUtils.lerp(this.startPos.x, this.targetPos.x, easeT);
+          this.pos.y = THREE.MathUtils.lerp(this.startPos.y, this.targetPos.y, easeT);
+
+          // 비행 중 공중 포물선 (Z축 높이 peak)
+          const arcHeight = Math.sin(t * Math.PI) * 1.0;
+          this.pos.z = THREE.MathUtils.lerp(this.startPos.z, this.targetPos.z, easeT) + arcHeight;
+
+          // 비행 중 회전 평평하게 복원
+          this.rot.x += (0 - this.rot.x) * 0.2;
+          this.rot.y += (0 - this.rot.y) * 0.2;
+          this.rot.z += (0 - this.rot.z) * 0.2;
+        }
+
+        // Mesh 최종 반용
+        this.mesh.position.copy(this.pos);
+        this.mesh.rotation.copy(this.rot);
+      }
     }
 
-    // ===== 4. Tabletop 3D Raycasting / 드래그 컨트롤 =====
+    const cardPhysics = new FlyingCardPhysics(cardMesh);
+
+    // 6. 마우스/터치 레이캐스팅 및 인터랙션
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Z축 직교 드래그 평면
     const planeIntersection = new THREE.Vector3();
 
-    function getMousePos(e) {
-      const x = e.touches ? e.touches[0].clientX : e.clientX;
-      const y = e.touches ? e.touches[0].clientY : e.clientY;
-      mouse.x = (x / window.innerWidth) * 2 - 1;
-      mouse.y = -(y / window.innerHeight) * 2 + 1;
+    function getPointerPos(e) {
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      mouse.x = (clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(clientY / window.innerHeight) * 2 + 1;
     }
 
-    let isCameraMode = false;
-
-    window.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('#ui-container') || isCameraMode) return;
-      getMousePos(e);
+    function onPointerDown(e) {
+      getPointerPos(e);
       raycaster.setFromCamera(mouse, camera);
-
-      const meshes = Object.values(objects).map(o => o.mesh);
-      const intersects = raycaster.intersectObjects(meshes);
+      const intersects = raycaster.intersectObject(cardMesh);
 
       if (intersects.length > 0) {
-        selectedObjId = intersects[0].object.userData.id;
-        const target = objects[selectedObjId];
-        target.body.wakeUp();
+        cardPhysics.onDragStart();
       }
-    });
+    }
 
-    window.addEventListener('pointermove', (e) => {
-      if (!selectedObjId || isCameraMode) return;
-      getMousePos(e);
+    function onPointerMove(e) {
+      if (!cardPhysics.isDragging) return;
+      getPointerPos(e);
       raycaster.setFromCamera(mouse, camera);
 
-      // 드래그 중인 물체의 평면 상 위치 계산
-      if (raycaster.ray.intersectPlane(plane, planeIntersection)) {
-        const obj = objects[selectedObjId];
-        obj.body.position.x = planeIntersection.x;
-        obj.body.position.z = planeIntersection.z;
-        obj.body.position.y = Math.max(0.5, planeIntersection.y + 0.8); // 약간 떠서 이동
-
-        // 서버로 현재 위치 실시간 브로드캐스트
-        socket.emit('move-object', {
-          id: selectedObjId,
-          x: obj.body.position.x,
-          y: obj.body.position.y,
-          z: obj.body.position.z,
-          qx: obj.body.quaternion.x,
-          qy: obj.body.quaternion.y,
-          qz: obj.body.quaternion.z,
-          qw: obj.body.quaternion.w
-        });
+      // 드래그 평면과의 교차점 좌표 추출
+      if (raycaster.ray.intersectPlane(dragPlane, planeIntersection)) {
+        cardPhysics.onDragMove(planeIntersection);
       }
-    });
-
-    window.addEventListener('pointerup', () => {
-      selectedObjId = null;
-    });
-
-    // ===== 5. 테이블탑 핵심 액션 기능 구현 =====
-
-    // 주사위 굴리기 (랜덤 충격량 부여)
-    document.getElementById('dice-btn').addEventListener('click', () => {
-      Object.values(objects).forEach(obj => {
-        if (obj.mesh.userData.type === 'dice') {
-          obj.body.velocity.set((Math.random() - 0.5) * 8, 8 + Math.random() * 5, (Math.random() - 0.5) * 8);
-          obj.body.angularVelocity.set(Math.random() * 10, Math.random() * 10, Math.random() * 10);
-        }
-      });
-      showToast('🎲 주사위를 굴렸습니다!');
-    });
-
-    // 선택한 개체 뒤집기 (Flip)
-    document.getElementById('flip-btn').addEventListener('click', () => {
-      if (!selectedObjId) { showToast('뒤집을 기물/카드를 먼저 선택하세요!'); return; }
-      const obj = objects[selectedObjId];
-      const q = new CANNON.Quaternion();
-      q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI); // 180도 회전
-      obj.body.quaternion = obj.body.quaternion.mult(q);
-      showToast('🔄 선택한 기물을 뒤집었습니다.');
-    });
-
-    // 카메라 모드 토글
-    const modeBtn = document.getElementById('mode-btn');
-    modeBtn.addEventListener('click', () => {
-      isCameraMode = !isCameraMode;
-      controls.enableRotate = isCameraMode;
-      modeBtn.textContent = isCameraMode ? "기물 이동 모드" : "카메라 시점 이동";
-      if (isCameraMode) modeBtn.classList.add('camera-mode');
-      else modeBtn.classList.remove('camera-mode');
-    });
-
-    // 판 초기화 (Table Flip)
-    document.getElementById('reset-btn').addEventListener('click', () => {
-      socket.emit('reset-game');
-    });
-
-    function showToast(msg) {
-      const toast = document.getElementById('toast');
-      toast.textContent = msg; toast.style.display = 'block';
-      setTimeout(() => { toast.style.display = 'none'; }, 2000);
     }
 
-    // ===== 6. 소켓 실시간 동기화 =====
-    socket.on('init-physics-objects', (data) => {
-      // 판 초기화 후 기물 재배치
-      Object.keys(objects).forEach(id => {
-        scene.remove(objects[id].mesh);
-        world.remove(objects[id].body);
-        delete objects[id];
-      });
-      Object.values(data).forEach(createPhysicsObject);
-    });
-
-    socket.on('update-object', (data) => {
-      if (objects[data.id] && data.id !== selectedObjId) {
-        const b = objects[data.id].body;
-        b.position.set(data.x, data.y, data.z);
-        if (data.qx !== undefined) b.quaternion.set(data.qx, data.qy, data.qz, data.qw);
+    function onPointerUp() {
+      if (cardPhysics.isDragging) {
+        // 손을 놓으면 현재 위치 부근 또는 목표 지점으로 비행 착지
+        cardPhysics.onDragEnd(cardPhysics.pos.x, cardPhysics.pos.y, 0.01);
       }
-    });
-
-    // ===== 7. 메인 물리 & 렌더링 루프 =====
-    function animate() {
-      requestAnimationFrame(animate);
-      world.step(1 / 60);
-
-      // Cannon.js 물리 메쉬 위치를 Three.js 메쉬에 매핑
-      Object.values(objects).forEach(obj => {
-        obj.mesh.position.copy(obj.body.position);
-        obj.mesh.quaternion.copy(obj.body.quaternion);
-      });
-
-      controls.update();
-      renderer.render(scene, camera);
     }
-    animate();
 
+    // 이벤트 리스너 등록 (PC/모바일 통합)
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+
+    // 창 크기 변경 대응
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    // 7. 메인 렌더 루프
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+
+      // 카드 물리 및 비행 연출 갱신
+      cardPhysics.update(delta);
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
   </script>
 </body>
 </html>
