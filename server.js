@@ -11,25 +11,25 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 현재 진행 중인 게임 상태 관리
-let currentGame = 'jenga'; // 기본값: jenga
+let currentGame = 'jenga';
 let gameObjects = {};
 
-// 1. 젠가 게임 데이터 생성
+// 1. 젠가 블록 생성 (안정화 유격 적용)
 function createJengaBlocks() {
   const blocks = {};
   const blockWidth = 3;
   const blockHeight = 0.6;
-  const blockDepth = 1;
   let idCount = 0;
 
   for (let floor = 0; floor < 18; floor++) {
     const isEven = floor % 2 === 0;
-    const y = floor * blockHeight + blockHeight / 2;
+    // Y축 높이 간격을 0.6 -> 0.62로 미세하게 늘려 층간 겹침 방지
+    const y = floor * 0.62 + blockHeight / 2 + 0.1;
 
     for (let i = 0; i < 3; i++) {
       const id = `jenga_${idCount++}`;
-      const offset = (i - 1) * blockDepth;
+      // 가로 간격을 1.0 -> 1.05로 미세하게 늘려 옆 블록과의 충돌 방지
+      const offset = (i - 1) * 1.05;
 
       let x = 0, z = 0, rotY = 0;
 
@@ -55,7 +55,7 @@ function createJengaBlocks() {
   return blocks;
 }
 
-// 2. 기본 체크 보드게임 데이터 생성
+// 2. 클래식 보드게임 생성
 function createClassicBoardObjects() {
   return {
     red_cube: { id: 'red_cube', type: 'cube', x: -3, y: 0.5, z: -3, color: 0xef4444 },
@@ -67,16 +67,13 @@ function createClassicBoardObjects() {
   };
 }
 
-// 초기 게임 설정
 gameObjects = createJengaBlocks();
 
 io.on('connection', (socket) => {
   console.log('플레이어 접속:', socket.id);
 
-  // 접속 시 현재 게임 종류와 상태 전달
   socket.emit('init-game', { game: currentGame, objects: gameObjects });
 
-  // 게임 변경 요청 수신 (메뉴 선택)
   socket.on('change-game', (gameType) => {
     currentGame = gameType;
     if (gameType === 'jenga') {
@@ -84,12 +81,9 @@ io.on('connection', (socket) => {
     } else if (gameType === 'classic') {
       gameObjects = createClassicBoardObjects();
     }
-    
-    // 연결된 모든 플레이어에게 새로 변경된 게임판 전송
     io.emit('init-game', { game: currentGame, objects: gameObjects });
   });
 
-  // 오브젝트 이동 및 물리 동기화
   socket.on('move-object', (data) => {
     if (gameObjects[data.id]) {
       Object.assign(gameObjects[data.id], data);
@@ -97,7 +91,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 젠가/게임 리셋 요청
   socket.on('reset-game', () => {
     if (currentGame === 'jenga') {
       gameObjects = createJengaBlocks();
