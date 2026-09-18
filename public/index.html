@@ -2,19 +2,18 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <!-- 모바일 뷰포트 설정 및 제스처 줌 방지 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Mobile Web TTS</title>
+  <title>Mobile Web Tabletop Simulator</title>
   <style>
     * {
-      touch-action: none; /* 모바일 브라우저 기본 스크롤/새로고침 제스처 차단 */
+      touch-action: none; /* 모바일 터치 스크롤/새로고침 방지 */
       user-select: none;
       -webkit-user-select: none;
     }
     body {
       margin: 0;
       overflow: hidden;
-      background-color: #111;
+      background-color: #121212;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     #ui-container {
@@ -26,10 +25,11 @@
       justify-content: space-between;
       align-items: center;
       pointer-events: none;
+      z-index: 10;
     }
     #info {
       color: white;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.7);
       padding: 8px 14px;
       border-radius: 20px;
       font-size: 13px;
@@ -44,7 +44,7 @@
       border-radius: 20px;
       font-size: 14px;
       font-weight: bold;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.4);
       cursor: pointer;
     }
     #mode-btn.camera-mode {
@@ -65,41 +65,86 @@
   <script>
     const socket = io();
 
-    // 1. Scene & Camera
+    // 1. Scene 및 카메라 설정
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    scene.background = new THREE.Color(0x111625); // 세련된 어두운 테마
 
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 12, 10);
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 14, 12);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 모바일 해상도 대응 및 성능 최적화
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
 
-    // 2. Controls & Lights
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableRotate = false; // 기본은 물체 드래그 모드로 시작
+    controls.enableRotate = false; // 기본: 물체 이동 모드
     controls.enablePan = false;
 
+    // 2. 조명 설정
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    dirLight.position.set(5, 15, 5);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(8, 20, 8);
     dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
     scene.add(dirLight);
 
-    // 3. Table Board
-    const tableGeometry = new THREE.BoxGeometry(12, 0.2, 12);
-    const tableMaterial = new THREE.MeshStandardMaterial({ color: 0x1e3a8a });
-    const table = new THREE.Mesh(tableGeometry, tableMaterial);
-    table.position.y = -0.1;
-    table.receiveShadow = true;
-    scene.add(table);
+    // 3. 🎨 동적 보드게임판 텍스처 생성 함수 (캔버스 이용)
+    function createBoardTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
 
-    // 4. Object & Interaction Settings
+      const gridSize = 8;
+      const tileSize = canvas.width / gridSize;
+
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          ctx.fillStyle = (r + c) % 2 === 0 ? '#e2d5c3' : '#4a3525'; // 밝은 아이보리 / 클래식 나무색
+          ctx.fillRect(c * tileSize, r * tileSize, tileSize, tileSize);
+        }
+      }
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      return texture;
+    }
+
+    // 4. 🎲 보드게임 상판 & 테두리 제작
+    const boardGroup = new THREE.Group();
+
+    // 중앙 격자 게임판
+    const boardGeo = new THREE.BoxGeometry(12, 0.2, 12);
+    const boardMat = new THREE.MeshStandardMaterial({
+      map: createBoardTexture(),
+      roughness: 0.4
+    });
+    const boardMesh = new THREE.Mesh(boardGeo, boardMat);
+    boardMesh.position.y = -0.1;
+    boardMesh.receiveShadow = true;
+    boardGroup.add(boardMesh);
+
+    // 원목 테두리 프레임
+    const frameGeo = new THREE.BoxGeometry(13.2, 0.3, 13.2);
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x2d1a0e, // 진한 나무색
+      roughness: 0.6
+    });
+    const frameMesh = new THREE.Mesh(frameGeo, frameMat);
+    frameMesh.position.y = -0.16;
+    frameMesh.receiveShadow = true;
+    boardGroup.add(frameMesh);
+
+    scene.add(boardGroup);
+
+    // 5. 게임 오브젝트 관리
     const objects = {};
     const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const raycaster = new THREE.Raycaster();
@@ -107,7 +152,7 @@
     let selectedObject = null;
     let isCameraMode = false;
 
-    // 모드 전환 버튼 (물체 이동 <-> 카메라 회전)
+    // UI 모드 토글 버튼
     const modeBtn = document.getElementById('mode-btn');
     const infoText = document.getElementById('info');
 
@@ -126,21 +171,32 @@
       }
     });
 
-    function createCube(id, x, y, z, color) {
-      const geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-      const material = new THREE.MeshStandardMaterial({ color: color });
-      const cube = new THREE.Mesh(geometry, material);
-      cube.position.set(x, y, z);
-      cube.castShadow = true;
-      cube.userData = { id: id };
-      scene.add(cube);
-      objects[id] = cube;
+    // 6. 다양한 보드게임 말/토큰 생성기 (큐브, 원기둥 말)
+    function createPiece(id, type, x, y, z, color) {
+      let geometry;
+      if (type === 'token') {
+        geometry = new THREE.CylinderGeometry(0.6, 0.6, 0.3, 32); // 동전/토큰 말
+      } else {
+        geometry = new THREE.BoxGeometry(1, 1, 1); // 주사위/큐브
+      }
+
+      const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.1 });
+      const piece = new THREE.Mesh(geometry, material);
+      piece.position.set(x, y, z);
+      piece.castShadow = true;
+      piece.receiveShadow = true;
+      piece.userData = { id: id };
+      
+      scene.add(piece);
+      objects[id] = piece;
     }
 
-    // Socket Events
+    // 서버 동기화 처리
     socket.on('init-state', (data) => {
       Object.values(data).forEach(obj => {
-        if (!objects[obj.id]) createCube(obj.id, obj.x, obj.y, obj.z, obj.color);
+        if (!objects[obj.id]) {
+          createPiece(obj.id, obj.type || 'cube', obj.x, obj.y, obj.z, obj.color);
+        }
       });
     });
 
@@ -151,7 +207,7 @@
       }
     });
 
-    // 5. Mobile Pointer / Touch Events
+    // 7. 터치/마우스 이동 제어
     function updateTouchPos(e) {
       const x = e.touches ? e.touches[0].clientX : e.clientX;
       const y = e.touches ? e.touches[0].clientY : e.clientY;
@@ -194,13 +250,14 @@
       selectedObject = null;
     });
 
-    // Resize Handler
+    // 화면 크기 변경 감지
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
+    // 애니메이션 루프
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
