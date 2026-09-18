@@ -11,13 +11,12 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-let currentGame = 'onecard'; // 기본 게임
+let currentGame = 'onecard';
 let gameObjects = {};
 
 // ===== 1. 젠가 데이터 생성 =====
 function createJengaBlocks() {
   const blocks = {};
-  const blockWidth = 3;
   const blockHeight = 0.6;
   let idCount = 0;
 
@@ -57,7 +56,7 @@ function createClassicBoardObjects() {
   };
 }
 
-// ===== 3. 원카드 상태 관리 =====
+// ===== 3. 원카드 로직 =====
 let players = [];
 let currentTurnIndex = 0;
 let turnDirection = 1;
@@ -133,18 +132,14 @@ io.on('connection', (socket) => {
   console.log('플레이어 접속:', socket.id);
   players.push(socket.id);
 
-  // 접속 초기화
   socket.emit('init-game-mode', { game: currentGame });
-  if (currentGame === 'jenga') {
-    socket.emit('init-physics-objects', gameObjects);
-  } else if (currentGame === 'classic') {
+  if (currentGame === 'jenga' || currentGame === 'classic') {
     socket.emit('init-physics-objects', gameObjects);
   } else if (currentGame === 'onecard') {
     if (Object.keys(playerHands).length === 0) initOneCardGame();
     else broadcastOneCardState();
   }
 
-  // 게임 전환 이벤트
   socket.on('change-game', (gameType) => {
     currentGame = gameType;
     if (gameType === 'jenga') {
@@ -161,7 +156,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 젠가/체크보드 기물 이동
   socket.on('move-object', (data) => {
     if (gameObjects[data.id]) {
       Object.assign(gameObjects[data.id], data);
@@ -169,7 +163,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 원카드: 카드 내기
   socket.on('play-card', (cardId) => {
     if (currentGame !== 'onecard' || players[currentTurnIndex] !== socket.id) return;
 
@@ -209,7 +202,6 @@ io.on('connection', (socket) => {
     broadcastOneCardState();
   });
 
-  // 원카드: 카드 드로우
   socket.on('draw-card', () => {
     if (currentGame !== 'onecard' || players[currentTurnIndex] !== socket.id) return;
 
