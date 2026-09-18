@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Mobile Web Tabletop Simulator</title>
+  <title>Web Tabletop Simulator</title>
   <style>
     * {
-      touch-action: none; /* 모바일 터치 스크롤/새로고침 방지 */
+      touch-action: none;
       user-select: none;
       -webkit-user-select: none;
     }
@@ -24,190 +24,224 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      pointer-events: none;
       z-index: 10;
+      pointer-events: none;
     }
-    #info {
-      color: white;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 8px 14px;
-      border-radius: 20px;
-      font-size: 13px;
-      backdrop-filter: blur(4px);
-    }
-    #mode-btn {
+    .btn {
       pointer-events: auto;
       background: #2563eb;
       color: white;
       border: none;
-      padding: 10px 16px;
+      padding: 10px 14px;
       border-radius: 20px;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: bold;
       box-shadow: 0 4px 8px rgba(0,0,0,0.4);
       cursor: pointer;
+      margin-right: 6px;
     }
-    #mode-btn.camera-mode {
-      background: #059669;
+    #menu-btn { background: #8b5cf6; }
+    #reset-btn { background: #dc2626; }
+    #mode-btn.camera-mode { background: #059669; }
+
+    /* 게임 선택 레이어 팝업 메뉴 */
+    #game-menu-modal {
+      display: none;
+      position: absolute;
+      top: 60px;
+      left: 12px;
+      background: rgba(24, 24, 27, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 16px;
+      z-index: 100;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+      width: 200px;
+    }
+    #game-menu-modal h3 {
+      color: white;
+      margin: 0 0 12px 0;
+      font-size: 15px;
+      text-align: center;
+    }
+    .menu-item {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 8px;
+      background: #27272a;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .menu-item:hover, .menu-item:active {
+      background: #3f3f46;
     }
   </style>
 </head>
 <body>
   <div id="ui-container">
-    <div id="info">상태: 물체 이동 모드</div>
-    <button id="mode-btn">카메라 회전 모드 전환</button>
+    <div>
+      <button id="menu-btn" class="btn">🎮 게임 선택</button>
+      <button id="reset-btn" class="btn">판 초기화</button>
+    </div>
+    <button id="mode-btn" class="btn">카메라 회전 모드</button>
+  </div>
+
+  <!-- 게임 선택 메뉴 창 -->
+  <div id="game-menu-modal">
+    <h3>보드게임 목록</h3>
+    <button class="menu-item" onclick="selectGame('jenga')">🪵 3D 젠가 (Jenga)</button>
+    <button class="menu-item" onclick="selectGame('classic')">♟️ 클래식 체크보드</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
   <script>
     const socket = io();
 
-    // 1. Scene 및 카메라 설정
+    // 1. Scene 설정
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111625); // 세련된 어두운 테마
+    scene.background = new THREE.Color(0x111625);
 
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 14, 12);
+    camera.position.set(0, 12, 14);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
 
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableRotate = false; // 기본: 물체 이동 모드
-    controls.enablePan = false;
+    controls.enableRotate = false;
 
-    // 2. 조명 설정
+    // 2. 물리 세계 설정 (Cannon.js)
+    const world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
+
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(8, 20, 8);
+    dirLight.position.set(10, 20, 10);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 1024;
-    dirLight.shadow.mapSize.height = 1024;
     scene.add(dirLight);
 
-    // 3. 🎨 동적 보드게임판 텍스처 생성 함수 (캔버스 이용)
-    function createBoardTexture() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
-      const ctx = canvas.getContext('2d');
+    // 바닥
+    const tableGeo = new THREE.BoxGeometry(14, 0.4, 14);
+    const tableMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 });
+    const tableMesh = new THREE.Mesh(tableGeo, tableMat);
+    tableMesh.position.y = -0.2;
+    tableMesh.receiveShadow = true;
+    scene.add(tableMesh);
 
-      const gridSize = 8;
-      const tileSize = canvas.width / gridSize;
+    const tableBody = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(7, 0.2, 7)) });
+    tableBody.position.set(0, -0.2, 0);
+    world.addBody(tableBody);
 
-      for (let r = 0; r < gridSize; r++) {
-        for (let c = 0; c < gridSize; c++) {
-          ctx.fillStyle = (r + c) % 2 === 0 ? '#e2d5c3' : '#4a3525'; // 밝은 아이보리 / 클래식 나무색
-          ctx.fillRect(c * tileSize, r * tileSize, tileSize, tileSize);
-        }
-      }
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.wrapS = THREE.ClampToEdgeWrapping;
-      texture.wrapT = THREE.ClampToEdgeWrapping;
-      return texture;
-    }
-
-    // 4. 🎲 보드게임 상판 & 테두리 제작
-    const boardGroup = new THREE.Group();
-
-    // 중앙 격자 게임판
-    const boardGeo = new THREE.BoxGeometry(12, 0.2, 12);
-    const boardMat = new THREE.MeshStandardMaterial({
-      map: createBoardTexture(),
-      roughness: 0.4
-    });
-    const boardMesh = new THREE.Mesh(boardGeo, boardMat);
-    boardMesh.position.y = -0.1;
-    boardMesh.receiveShadow = true;
-    boardGroup.add(boardMesh);
-
-    // 원목 테두리 프레임
-    const frameGeo = new THREE.BoxGeometry(13.2, 0.3, 13.2);
-    const frameMat = new THREE.MeshStandardMaterial({
-      color: 0x2d1a0e, // 진한 나무색
-      roughness: 0.6
-    });
-    const frameMesh = new THREE.Mesh(frameGeo, frameMat);
-    frameMesh.position.y = -0.16;
-    frameMesh.receiveShadow = true;
-    boardGroup.add(frameMesh);
-
-    scene.add(boardGroup);
-
-    // 5. 게임 오브젝트 관리
+    // 3. 게임 오브젝트 관리
     const objects = {};
-    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const raycaster = new THREE.Raycaster();
-    const touchPos = new THREE.Vector2();
-    let selectedObject = null;
-    let isCameraMode = false;
+    let currentGameType = 'jenga';
 
-    // UI 모드 토글 버튼
-    const modeBtn = document.getElementById('mode-btn');
-    const infoText = document.getElementById('info');
+    const jengaGeo = new THREE.BoxGeometry(3, 0.6, 1);
+    const jengaShape = new CANNON.Box(new CANNON.Vec3(1.5, 0.3, 0.5));
 
-    modeBtn.addEventListener('click', () => {
-      isCameraMode = !isCameraMode;
-      controls.enableRotate = isCameraMode;
-      
-      if (isCameraMode) {
-        modeBtn.textContent = "물체 이동 모드 전환";
-        modeBtn.classList.add('camera-mode');
-        infoText.textContent = "상태: 화면 회전 모드";
-      } else {
-        modeBtn.textContent = "카메라 회전 모드 전환";
-        modeBtn.classList.remove('camera-mode');
-        infoText.textContent = "상태: 물체 이동 모드";
-      }
-    });
-
-    // 6. 다양한 보드게임 말/토큰 생성기 (큐브, 원기둥 말)
-    function createPiece(id, type, x, y, z, color) {
-      let geometry;
-      if (type === 'token') {
-        geometry = new THREE.CylinderGeometry(0.6, 0.6, 0.3, 32); // 동전/토큰 말
-      } else {
-        geometry = new THREE.BoxGeometry(1, 1, 1); // 주사위/큐브
-      }
-
-      const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.1 });
-      const piece = new THREE.Mesh(geometry, material);
-      piece.position.set(x, y, z);
-      piece.castShadow = true;
-      piece.receiveShadow = true;
-      piece.userData = { id: id };
-      
-      scene.add(piece);
-      objects[id] = piece;
+    function clearScene() {
+      Object.keys(objects).forEach(id => {
+        scene.remove(objects[id].mesh);
+        if (objects[id].body) world.remove(objects[id].body);
+        delete objects[id];
+      });
     }
 
-    // 서버 동기화 처리
-    socket.on('init-state', (data) => {
-      Object.values(data).forEach(obj => {
-        if (!objects[obj.id]) {
-          createPiece(obj.id, obj.type || 'cube', obj.x, obj.y, obj.z, obj.color);
-        }
-      });
+    function createPiece(data) {
+      let mesh, body;
+
+      if (data.type === 'jenga_block') {
+        const mat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 });
+        mesh = new THREE.Mesh(jengaGeo, mat);
+        body = new CANNON.Body({ mass: 0.1, shape: jengaShape, linearDamping: 0.4, angularDamping: 0.4 });
+        body.position.set(data.x, data.y, data.z);
+        body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), data.rotY);
+        world.addBody(body);
+      } else {
+        let geo = data.type === 'token' ? new THREE.CylinderGeometry(0.6, 0.6, 0.3, 32) : new THREE.BoxGeometry(1, 1, 1);
+        const mat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 });
+        mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(data.x, data.y, data.z);
+      }
+
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData = { id: data.id, type: data.type };
+      scene.add(mesh);
+
+      objects[data.id] = { mesh, body };
+    }
+
+    // 소켓 이벤트 (게임 초기화)
+    socket.on('init-game', (data) => {
+      clearScene();
+      currentGameType = data.game;
+      Object.values(data.objects).forEach(createPiece);
     });
 
     socket.on('update-object', (data) => {
       if (objects[data.id]) {
-        objects[data.id].position.x = data.x;
-        objects[data.id].position.z = data.z;
+        if (objects[data.id].body) {
+          const b = objects[data.id].body;
+          b.position.set(data.x, data.y, data.z);
+          if (data.qx !== undefined) b.quaternion.set(data.qx, data.qy, data.qz, data.qw);
+        } else {
+          objects[data.id].mesh.position.set(data.x, data.z ? data.y : data.x, data.z);
+        }
       }
     });
 
-    // 7. 터치/마우스 이동 제어
+    // 4. UI 및 게임 선택 모달
+    const menuBtn = document.getElementById('menu-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const modeBtn = document.getElementById('mode-btn');
+    const modal = document.getElementById('game-menu-modal');
+    let isCameraMode = false;
+
+    menuBtn.addEventListener('click', () => {
+      modal.style.display = modal.style.display === 'block' ? 'none' : 'block';
+    });
+
+    function selectGame(gameType) {
+      socket.emit('change-game', gameType);
+      modal.style.display = 'none';
+    }
+
+    resetBtn.addEventListener('click', () => {
+      socket.emit('reset-game');
+    });
+
+    modeBtn.addEventListener('click', () => {
+      isCameraMode = !isCameraMode;
+      controls.enableRotate = isCameraMode;
+      modeBtn.textContent = isCameraMode ? "물체 이동 모드" : "카메라 회전 모드";
+      if (isCameraMode) modeBtn.classList.add('camera-mode');
+      else modeBtn.classList.remove('camera-mode');
+    });
+
+    // 5. 드래그 및 터치 인터랙션
+    const raycaster = new THREE.Raycaster();
+    const touchPos = new THREE.Vector2();
+    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    let selectedObject = null;
+
     function updateTouchPos(e) {
       const x = e.touches ? e.touches[0].clientX : e.clientX;
       const y = e.touches ? e.touches[0].clientY : e.clientY;
@@ -216,14 +250,16 @@
     }
 
     window.addEventListener('pointerdown', (e) => {
-      if (isCameraMode) return;
+      if (isCameraMode || e.target.closest('#ui-container') || e.target.closest('#game-menu-modal')) return;
       updateTouchPos(e);
 
       raycaster.setFromCamera(touchPos, camera);
-      const intersects = raycaster.intersectObjects(Object.values(objects));
+      const meshes = Object.values(objects).map(o => o.mesh);
+      const intersects = raycaster.intersectObjects(meshes);
 
       if (intersects.length > 0) {
-        selectedObject = intersects[0].object;
+        const hitMesh = intersects[0].object;
+        selectedObject = objects[hitMesh.userData.id];
       }
     });
 
@@ -231,35 +267,50 @@
       if (!selectedObject || isCameraMode) return;
       updateTouchPos(e);
 
-      raycaster.setFromCamera(touchPos, camera);
-      const intersectionPoint = new THREE.Vector3();
+      if (selectedObject.body) { // 젠가 같은 물리 오브젝트일 때
+        const forceVec = new CANNON.Vec3(touchPos.x * 2, 0, -touchPos.y * 2);
+        selectedObject.body.applyImpulse(forceVec, selectedObject.body.position);
 
-      if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
-        selectedObject.position.x = intersectionPoint.x;
-        selectedObject.position.z = intersectionPoint.z;
-
+        const b = selectedObject.body;
         socket.emit('move-object', {
-          id: selectedObject.userData.id,
-          x: selectedObject.position.x,
-          z: selectedObject.position.z
+          id: selectedObject.mesh.userData.id,
+          x: b.position.x, y: b.position.y, z: b.position.z,
+          qx: b.quaternion.x, qy: b.quaternion.y, qz: b.quaternion.z, qw: b.quaternion.w
         });
+      } else { // 일반 말일 때
+        raycaster.setFromCamera(touchPos, camera);
+        const point = new THREE.Vector3();
+        if (raycaster.ray.intersectPlane(dragPlane, point)) {
+          selectedObject.mesh.position.x = point.x;
+          selectedObject.mesh.position.z = point.z;
+          socket.emit('move-object', {
+            id: selectedObject.mesh.userData.id,
+            x: point.x, y: selectedObject.mesh.position.y, z: point.z
+          });
+        }
       }
     });
 
-    window.addEventListener('pointerup', () => {
-      selectedObject = null;
-    });
+    window.addEventListener('pointerup', () => { selectedObject = null; });
 
-    // 화면 크기 변경 감지
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // 애니메이션 루프
+    // 6. 애니메이션 Loop
     function animate() {
       requestAnimationFrame(animate);
+      world.step(1 / 60);
+
+      Object.values(objects).forEach(obj => {
+        if (obj.body) {
+          obj.mesh.position.copy(obj.body.position);
+          obj.mesh.quaternion.copy(obj.body.quaternion);
+        }
+      });
+
       controls.update();
       renderer.render(scene, camera);
     }
