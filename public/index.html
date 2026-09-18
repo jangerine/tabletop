@@ -102,10 +102,10 @@
 
   <div id="game-menu-modal">
     <h3>보드판 소품 추가</h3>
+    <button class="menu-item" onclick="addObjects('cards')">🃏 원카드 덱 추가</button>
     <button class="menu-item" onclick="addObjects('jenga')">🪵 3D 젠가 타워 설치</button>
     <button class="menu-item" onclick="addObjects('dice')">🎲 주사위 2개 추가</button>
     <button class="menu-item" onclick="addObjects('figures')">♟️ 피규어 & 토큰 추가</button>
-    <button class="menu-item" onclick="addObjects('cards')">🃏 원카드 덱 추가</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -151,7 +151,7 @@
     // ===== 2. Cannon.js 물리 엔진 =====
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
-    world.allowSleep = true; // 젠가 타워 안정성을 위해 Sleep 유효화
+    world.allowSleep = true;
 
     const boardMaterial = new CANNON.Material('boardMat');
     world.addContactMaterial(new CANNON.ContactMaterial(boardMaterial, boardMaterial, { friction: 0.2, restitution: 0.0 }));
@@ -235,7 +235,7 @@
       return texture;
     }
 
-    // ===== 4. 플라잉 카드 physics =====
+    // ===== 4. 안정화된 플라잉 카드 physics =====
     class FlyingCardPhysics {
       constructor(mesh, id) {
         this.mesh = mesh;
@@ -260,7 +260,7 @@
 
       onDragStart() { this.isDragging = true; this.isFlying = false; this.targetY = 0.8; }
       onDragMove(targetWorldPos) {
-        if (!this.isDragging) return;
+        if (!this.isDragging || isNaN(targetWorldPos.x) || isNaN(targetWorldPos.z)) return;
         this.velocity.x = targetWorldPos.x - this.pos.x;
         this.velocity.z = targetWorldPos.z - this.pos.z;
         this.pos.x = targetWorldPos.x;
@@ -270,8 +270,8 @@
         if (!this.isDragging) return;
         this.isDragging = false; this.isFlying = true; this.flyProgress = 0;
         this.startPos.copy(this.pos);
-        const throwX = THREE.MathUtils.clamp(this.pos.x + this.velocity.x * 2.0, -6, 6);
-        const throwZ = THREE.MathUtils.clamp(this.pos.z + this.velocity.z * 2.0, -6, 6);
+        const throwX = THREE.MathUtils.clamp(this.pos.x + this.velocity.x * 1.5, -6, 6);
+        const throwZ = THREE.MathUtils.clamp(this.pos.z + this.velocity.z * 1.5, -6, 6);
         this.targetPos.set(throwX, 0.05, throwZ);
       }
       flip() {
@@ -297,8 +297,8 @@
 
         if (this.isDragging) {
           this.pos.y += (this.targetY - this.pos.y) * 0.2;
-          const targetTiltX = -this.velocity.z * 0.8;
-          const targetTiltZ = -this.velocity.x * 0.8;
+          const targetTiltX = -this.velocity.z * 0.5;
+          const targetTiltZ = -this.velocity.x * 0.5;
           this.tiltRot.x += (targetTiltX - this.tiltRot.x) * 0.2;
           this.tiltRot.z += (targetTiltZ - this.tiltRot.z) * 0.2;
           this.velocity.multiplyScalar(0.7);
@@ -402,7 +402,7 @@
       objects[data.id] = { mesh, body };
     }
 
-    // 소켓 수신
+    // 소켓 동기화
     socket.on('init-physics-objects', (data) => {
       clearAll();
       Object.values(data).forEach(createPiece);
@@ -415,7 +415,7 @@
       } else if (objects[data.id] && objects[data.id].body) {
         const b = objects[data.id].body;
         if (selectedObject && (selectedObject.mesh.userData.id === data.id || (selectedObject.mesh.children[0] && selectedObject.mesh.children[0].userData.id === data.id))) {
-          return; // 내가 잡고 있는 동안은 서버 위치 수신 보정 차단
+          return;
         }
         b.position.set(data.x, data.y, data.z);
         if (data.qx !== undefined) b.quaternion.set(data.qx, data.qy, data.qz, data.qw);
@@ -440,7 +440,7 @@
       if (flyingCards[data.id]) flyingCards[data.id].flip();
     });
 
-    // ===== 6. 개선된 젠가 & 물체 직접 3D 드래그 로직 =====
+    // ===== 6. 카드 및 물체 드래그 오류 완벽 보정 =====
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
     let selectedObject = null;
@@ -455,7 +455,8 @@
       touchPos.y = -(y / window.innerHeight) * 2 + 1;
     }
 
-    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    // 카드 이동용 바닥 직교 평면
+    const cardDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const planeIntersection = new THREE.Vector3();
 
     window.addEventListener('pointerdown', (e) => {
@@ -465,7 +466,7 @@
       updateTouchPos(e);
       raycaster.setFromCamera(touchPos, camera);
 
-      // 1) 플라잉 카드 검사
+      // 1) 카드 검사
       const cardMeshes = Object.values(flyingCards).map(c => c.mesh);
       const cardIntersects = raycaster.intersectObjects(cardMeshes);
 
@@ -500,14 +501,9 @@
         const objId = hitMesh.userData.id || (hitMesh.parent && hitMesh.parent.userData.id);
         if (objId && objects[objId]) {
           selectedObject = objects[objId];
-          
-          // 젠가 및 물체를 물리 잠금 해제(WakeUp)하고 속도 초기화
           selectedObject.body.wakeUp();
           selectedObject.body.velocity.set(0, 0, 0);
           selectedObject.body.angularVelocity.set(0, 0, 0);
-
-          // 드래그 충돌 평면 높이를 현재 오브젝트 Y 위치로 맞춤
-          dragPlane.constant = -selectedObject.body.position.y;
         }
       }
     });
@@ -517,33 +513,37 @@
       updateTouchPos(e);
       raycaster.setFromCamera(touchPos, camera);
 
+      // 카드 이동 안전 처리
       if (selectedCard) {
-        dragPlane.constant = 0;
-        if (raycaster.ray.intersectPlane(dragPlane, planeIntersection)) {
-          selectedCard.onDragMove(planeIntersection);
-          socket.emit('move-object', {
-            id: selectedCard.id,
-            x: selectedCard.pos.x, y: selectedCard.pos.y, z: selectedCard.pos.z
-          });
+        cardDragPlane.constant = 0; // 테이블 수평면 기준 고정
+        if (raycaster.ray.intersectPlane(cardDragPlane, planeIntersection)) {
+          if (!isNaN(planeIntersection.x) && !isNaN(planeIntersection.z)) {
+            selectedCard.onDragMove(planeIntersection);
+            socket.emit('move-object', {
+              id: selectedCard.id,
+              x: selectedCard.pos.x, y: selectedCard.pos.y, z: selectedCard.pos.z
+            });
+          }
         }
         return;
       }
 
-      // 젠가 및 물리 물체 부드러운 위치 직접 이동
+      // 젠가 및 일반 기물 이동
       if (selectedObject) {
-        if (raycaster.ray.intersectPlane(dragPlane, planeIntersection)) {
-          selectedObject.body.wakeUp();
-          
-          // 물체 좌표 직접 갱신 (젠가를 뽑아당길 수 있음)
-          selectedObject.body.position.x = planeIntersection.x;
-          selectedObject.body.position.z = planeIntersection.z;
+        cardDragPlane.constant = -selectedObject.body.position.y;
+        if (raycaster.ray.intersectPlane(cardDragPlane, planeIntersection)) {
+          if (!isNaN(planeIntersection.x) && !isNaN(planeIntersection.z)) {
+            selectedObject.body.wakeUp();
+            selectedObject.body.position.x = planeIntersection.x;
+            selectedObject.body.position.z = planeIntersection.z;
 
-          const b = selectedObject.body;
-          socket.emit('move-object', {
-            id: selectedObject.mesh.userData.id || selectedObject.mesh.children[0].userData.id,
-            x: b.position.x, y: b.position.y, z: b.position.z,
-            qx: b.quaternion.x, qy: b.quaternion.y, qz: b.quaternion.z, qw: b.quaternion.w
-          });
+            const b = selectedObject.body;
+            socket.emit('move-object', {
+              id: selectedObject.mesh.userData.id || selectedObject.mesh.children[0].userData.id,
+              x: b.position.x, y: b.position.y, z: b.position.z,
+              qx: b.quaternion.x, qy: b.quaternion.y, qz: b.quaternion.z, qw: b.quaternion.w
+            });
+          }
         }
       }
     });
