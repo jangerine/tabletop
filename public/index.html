@@ -44,7 +44,6 @@
     #reset-btn { background: #dc2626; }
     #mode-btn.camera-mode { background: #059669; }
 
-    /* 게임 선택 레이어 팝업 메뉴 */
     #game-menu-modal {
       display: none;
       position: absolute;
@@ -94,7 +93,6 @@
     <button id="mode-btn" class="btn">카메라 회전 모드</button>
   </div>
 
-  <!-- 게임 선택 메뉴 창 -->
   <div id="game-menu-modal">
     <h3>보드게임 목록</h3>
     <button class="menu-item" onclick="selectGame('jenga')">🪵 3D 젠가 (Jenga)</button>
@@ -128,6 +126,7 @@
     // 2. 물리 세계 설정 (Cannon.js)
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
+    world.solver.iterations = 15; // 물리 반복 계산을 올려 정확도 향상
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
@@ -154,7 +153,8 @@
     let currentGameType = 'jenga';
 
     const jengaGeo = new THREE.BoxGeometry(3, 0.6, 1);
-    const jengaShape = new CANNON.Box(new CANNON.Vec3(1.5, 0.3, 0.5));
+    // 물리 히트박스를 아주 살짝 좁혀 연쇄 겹침 충돌 방지
+    const jengaShape = new CANNON.Box(new CANNON.Vec3(1.48, 0.29, 0.48));
 
     function clearScene() {
       Object.keys(objects).forEach(id => {
@@ -170,7 +170,14 @@
       if (data.type === 'jenga_block') {
         const mat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 });
         mesh = new THREE.Mesh(jengaGeo, mat);
-        body = new CANNON.Body({ mass: 0.1, shape: jengaShape, linearDamping: 0.4, angularDamping: 0.4 });
+        
+        // 무게(mass)를 0.5로 늘리고 linearDamping/angularDamping을 0.8로 올려 흔들림 차단
+        body = new CANNON.Body({
+          mass: 0.5,
+          shape: jengaShape,
+          linearDamping: 0.8,
+          angularDamping: 0.8
+        });
         body.position.set(data.x, data.y, data.z);
         body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), data.rotY);
         world.addBody(body);
@@ -189,7 +196,6 @@
       objects[data.id] = { mesh, body };
     }
 
-    // 소켓 이벤트 (게임 초기화)
     socket.on('init-game', (data) => {
       clearScene();
       currentGameType = data.game;
@@ -208,7 +214,7 @@
       }
     });
 
-    // 4. UI 및 게임 선택 모달
+    // UI 제어
     const menuBtn = document.getElementById('menu-btn');
     const resetBtn = document.getElementById('reset-btn');
     const modeBtn = document.getElementById('mode-btn');
@@ -236,7 +242,7 @@
       else modeBtn.classList.remove('camera-mode');
     });
 
-    // 5. 드래그 및 터치 인터랙션
+    // 드래그/터치 제어
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
     const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -267,7 +273,7 @@
       if (!selectedObject || isCameraMode) return;
       updateTouchPos(e);
 
-      if (selectedObject.body) { // 젠가 같은 물리 오브젝트일 때
+      if (selectedObject.body) {
         const forceVec = new CANNON.Vec3(touchPos.x * 2, 0, -touchPos.y * 2);
         selectedObject.body.applyImpulse(forceVec, selectedObject.body.position);
 
@@ -277,7 +283,7 @@
           x: b.position.x, y: b.position.y, z: b.position.z,
           qx: b.quaternion.x, qy: b.quaternion.y, qz: b.quaternion.z, qw: b.quaternion.w
         });
-      } else { // 일반 말일 때
+      } else {
         raycaster.setFromCamera(touchPos, camera);
         const point = new THREE.Vector3();
         if (raycaster.ray.intersectPlane(dragPlane, point)) {
@@ -299,7 +305,6 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // 6. 애니메이션 Loop
     function animate() {
       requestAnimationFrame(animate);
       world.step(1 / 60);
