@@ -1,0 +1,13 @@
+{
+  "name": "web-tabletop-simulator",
+  "version": "1.0.0",
+  "description": "Simple Web-based Tabletop Simulator",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  }
+}
