@@ -37,6 +37,7 @@
       font-weight: bold;
       box-shadow: 0 4px 8px rgba(0,0,0,0.4);
       cursor: pointer;
+      pointer-events: auto;
     }
     #menu-btn { background: #8b5cf6; }
     #reset-btn { background: #dc2626; }
@@ -93,8 +94,8 @@
   </div>
 
   <div id="help-panel">
-    🖱️ <b>드래그:</b> 3D 기물 및 플라잉 카드 이동<br>
-    👆 <b>카드 더블 터치 / 클릭:</b> 공중 3D Flip 뒤집기
+    🖱️ <b>기물 이동 모드:</b> 드래그하여 물체 및 플라잉 카드 이동<br>
+    🎥 <b>카메라 모드:</b> 드래그하여 화면 전체 회전 및 시점 변경
   </div>
 
   <div id="toast"></div>
@@ -128,8 +129,11 @@
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
+    // OrbitControls 카메라 제어기 설정
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableRotate = false;
+    controls.enabled = false; // 기본값: 카메라 회전 비활성화 (기물 이동 모드)
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.8));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -156,15 +160,11 @@
     tableBody.position.set(0, -0.2, 0);
     world.addBody(tableBody);
 
-    // ===== 3. 고해상도 원카드 텍스처 생성기 =====
-
-    // 주사위 텍스처
+    // ===== 3. 텍스처 생성기 =====
     function createDiceMaterials() {
       const materials = [];
       const dotsMap = {
-        1: [[128, 128]],
-        2: [[70, 70], [186, 186]],
-        3: [[70, 70], [128, 128], [186, 186]],
+        1: [[128, 128]], 2: [[70, 70], [186, 186]], 3: [[70, 70], [128, 128], [186, 186]],
         4: [[70, 70], [186, 70], [70, 186], [186, 186]],
         5: [[70, 70], [186, 70], [128, 128], [70, 186], [186, 186]],
         6: [[70, 70], [186, 70], [70, 128], [186, 128], [70, 186], [186, 186]]
@@ -174,86 +174,51 @@
         const canvas = document.createElement('canvas');
         canvas.width = 256; canvas.height = 256;
         const ctx = canvas.getContext('2d');
-
         ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
         ctx.lineWidth = 12; ctx.strokeStyle = '#e2e8f0'; ctx.strokeRect(6, 6, 244, 244);
-
         ctx.fillStyle = num === 1 ? '#dc2626' : '#0f172a';
         dotsMap[num].forEach(([x, y]) => {
-          ctx.beginPath();
-          ctx.arc(x, y, num === 1 ? 32 : 22, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.beginPath(); ctx.arc(x, y, num === 1 ? 32 : 22, 0, Math.PI * 2); ctx.fill();
         });
-
         const texture = new THREE.CanvasTexture(canvas);
-        texture.needsUpdate = true;
         materials.push(new THREE.MeshStandardMaterial({ map: texture, roughness: 0.2 }));
       }
       return materials;
     }
 
-    // 원카드 카드 앞면 텍스처 (숫자 + 문양 + 귀퉁이 상징)
     function createCardFrontTexture(suit, value, color) {
       const canvas = document.createElement('canvas');
       canvas.width = 512; canvas.height = 768;
       const ctx = canvas.getContext('2d');
-
-      // 베이스 카드 바디
       ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 768);
       ctx.lineWidth = 16; ctx.strokeStyle = '#e2e8f0'; ctx.strokeRect(12, 12, 488, 744);
 
-      // 모서리 숫자/문양 (좌상단 & 우하단)
-      ctx.fillStyle = color;
-      ctx.font = 'bold 72px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(value, 35, 90);
-      ctx.font = 'bold 64px sans-serif';
-      ctx.fillText(suit, 35, 160);
+      ctx.fillStyle = color; ctx.font = 'bold 72px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(value, 35, 90); ctx.font = 'bold 64px sans-serif'; ctx.fillText(suit, 35, 160);
 
-      // 우하단 대칭 회전 렌더링
       ctx.save();
-      ctx.translate(512, 768);
-      ctx.rotate(Math.PI);
-      ctx.font = 'bold 72px sans-serif';
-      ctx.fillText(value, 35, 90);
-      ctx.font = 'bold 64px sans-serif';
-      ctx.fillText(suit, 35, 160);
+      ctx.translate(512, 768); ctx.rotate(Math.PI);
+      ctx.font = 'bold 72px sans-serif'; ctx.fillText(value, 35, 90);
+      ctx.font = 'bold 64px sans-serif'; ctx.fillText(suit, 35, 160);
       ctx.restore();
 
-      // 중앙 메인 문양
-      ctx.font = 'bold 180px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(suit, 256, 440);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.needsUpdate = true;
-      return texture;
+      ctx.font = 'bold 180px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(suit, 256, 440);
+      return new THREE.CanvasTexture(canvas);
     }
 
-    // 원카드 카드 뒷면 텍스처 (레드 클래식 패턴)
     function createCardBackTexture() {
       const canvas = document.createElement('canvas');
       canvas.width = 512; canvas.height = 768;
       const ctx = canvas.getContext('2d');
-
       ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, 512, 768);
       ctx.lineWidth = 16; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(16, 16, 480, 736);
-
       ctx.fillStyle = '#991b1b';
       for (let i = 36; i < 476; i += 32) {
-        for (let j = 36; j < 732; j += 32) {
-          ctx.fillRect(i, j, 16, 16);
-        }
+        for (let j = 36; j < 732; j += 32) ctx.fillRect(i, j, 16, 16);
       }
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 48px sans-serif';
-      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 48px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('ONE CARD', 256, 390);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.needsUpdate = true;
-      return texture;
+      return new THREE.CanvasTexture(canvas);
     }
 
     // ===== 4. 플라잉 카드 클래스 =====
@@ -262,20 +227,16 @@
         this.mesh = mesh;
         this.id = id;
         this.isDragging = false;
-
         this.pos = new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z);
         this.velocity = new THREE.Vector2(0, 0);
-
         this.baseRotY = 0;
         this.tiltRot = new THREE.Euler(0, 0, 0);
-
         this.targetY = 0.8;
         this.isFlying = false;
         this.flyProgress = 0;
         this.flyDuration = 0.4;
         this.startPos = new THREE.Vector3();
         this.targetPos = new THREE.Vector3();
-
         this.isFlipping = false;
         this.flipProgress = 0;
         this.flipDuration = 0.4;
@@ -283,12 +244,7 @@
         this.targetRotY = 0;
       }
 
-      onDragStart() {
-        this.isDragging = true;
-        this.isFlying = false;
-        this.targetY = 0.8;
-      }
-
+      onDragStart() { this.isDragging = true; this.isFlying = false; this.targetY = 0.8; }
       onDragMove(targetWorldPos) {
         if (!this.isDragging) return;
         this.velocity.x = targetWorldPos.x - this.pos.x;
@@ -296,40 +252,28 @@
         this.pos.x = targetWorldPos.x;
         this.pos.z = targetWorldPos.z;
       }
-
       onDragEnd() {
         if (!this.isDragging) return;
-        this.isDragging = false;
-        this.isFlying = true;
-        this.flyProgress = 0;
-
+        this.isDragging = false; this.isFlying = true; this.flyProgress = 0;
         this.startPos.copy(this.pos);
         const throwX = THREE.MathUtils.clamp(this.pos.x + this.velocity.x * 2.0, -6, 6);
         const throwZ = THREE.MathUtils.clamp(this.pos.z + this.velocity.z * 2.0, -6, 6);
         this.targetPos.set(throwX, 0.05, throwZ);
       }
-
       flip() {
         if (this.isFlipping) return;
-        this.isFlipping = true;
-        this.flipProgress = 0;
-        this.startRotY = this.baseRotY;
-        this.targetRotY = this.baseRotY + Math.PI;
-
+        this.isFlipping = true; this.flipProgress = 0;
+        this.startRotY = this.baseRotY; this.targetRotY = this.baseRotY + Math.PI;
         if (!this.isDragging && !this.isFlying) {
-          this.isFlying = true;
-          this.flyProgress = 0;
-          this.startPos.copy(this.pos);
-          this.targetPos.copy(this.pos);
+          this.isFlying = true; this.flyProgress = 0;
+          this.startPos.copy(this.pos); this.targetPos.copy(this.pos);
         }
       }
-
       update(delta) {
         if (this.isFlipping) {
           this.flipProgress += delta / this.flipDuration;
           if (this.flipProgress >= 1) {
-            this.flipProgress = 1;
-            this.isFlipping = false;
+            this.flipProgress = 1; this.isFlipping = false;
             this.baseRotY = this.targetRotY % (Math.PI * 2);
           }
           const t = this.flipProgress;
@@ -341,33 +285,24 @@
           this.pos.y += (this.targetY - this.pos.y) * 0.2;
           const targetTiltX = -this.velocity.z * 0.8;
           const targetTiltZ = -this.velocity.x * 0.8;
-
           this.tiltRot.x += (targetTiltX - this.tiltRot.x) * 0.2;
           this.tiltRot.z += (targetTiltZ - this.tiltRot.z) * 0.2;
           this.velocity.multiplyScalar(0.7);
         } else if (this.isFlying) {
           this.flyProgress += delta / this.flyDuration;
-          if (this.flyProgress >= 1) {
-            this.flyProgress = 1;
-            this.isFlying = false;
-          }
-
+          if (this.flyProgress >= 1) { this.flyProgress = 1; this.isFlying = false; }
           const t = this.flyProgress;
           const easeT = 1 - Math.pow(1 - t, 3);
-
           this.pos.x = THREE.MathUtils.lerp(this.startPos.x, this.targetPos.x, easeT);
           this.pos.z = THREE.MathUtils.lerp(this.startPos.z, this.targetPos.z, easeT);
-
           const peakHeight = this.isFlipping ? 1.5 : 0.6;
           const arcHeight = Math.sin(t * Math.PI) * peakHeight;
           this.pos.y = THREE.MathUtils.lerp(this.startPos.y, this.targetPos.y, easeT) + arcHeight;
-
           this.tiltRot.x += (0 - this.tiltRot.x) * 0.2;
           this.tiltRot.z += (0 - this.tiltRot.z) * 0.2;
         }
 
         this.mesh.position.copy(this.pos);
-
         const qBase = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.baseRotY);
         const qTilt = new THREE.Quaternion().setFromEuler(this.tiltRot);
         this.mesh.quaternion.copy(qTilt.multiply(qBase));
@@ -377,7 +312,6 @@
     // ===== 5. 3D 메쉬 생성기 =====
     const objects = {};
     const flyingCards = {};
-
     const jengaGeo = new THREE.BoxGeometry(3, 0.6, 1);
     const jengaShape = new CANNON.Box(new CANNON.Vec3(1.48, 0.29, 0.48));
     const cardGeo = new THREE.BoxGeometry(1.6, 0.02, 2.4);
@@ -399,8 +333,8 @@
         const sideMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
         const mat = [
           sideMat, sideMat, sideMat, sideMat,
-          new THREE.MeshStandardMaterial({ map: createCardFrontTexture(data.suit, data.value, data.color), roughness: 0.2 }), // index 4: 앞면
-          new THREE.MeshStandardMaterial({ map: createCardBackTexture(), roughness: 0.2 })  // index 5: 뒷면
+          new THREE.MeshStandardMaterial({ map: createCardFrontTexture(data.suit, data.value, data.color), roughness: 0.2 }),
+          new THREE.MeshStandardMaterial({ map: createCardBackTexture(), roughness: 0.2 })
         ];
         const mesh = new THREE.Mesh(cardGeo, mat);
         mesh.position.set(data.x, data.y, data.z);
@@ -430,9 +364,7 @@
         head.position.y = 0.5;
         base.castShadow = true; head.castShadow = true;
         group.add(base); group.add(head);
-
-        base.userData = { id: data.id };
-        head.userData = { id: data.id };
+        base.userData = { id: data.id }; head.userData = { id: data.id };
 
         mesh = group;
         body = new CANNON.Body({ mass: 0.4, shape: new CANNON.Cylinder(0.5, 0.6, 0.8, 16), material: boardMaterial });
@@ -485,13 +417,13 @@
       if (flyingCards[data.id]) flyingCards[data.id].flip();
     });
 
-    // ===== 6. Raycasting 오버랩 인터랙션 =====
+    // ===== 6. 터치 및 카메라 제어 토글 로직 =====
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
     let lastTouchPos = new THREE.Vector2();
     let selectedObject = null;
     let selectedCard = null;
-
+    let isCameraMode = false;
     let lastTapTime = 0;
 
     function updateTouchPos(e) {
@@ -506,6 +438,10 @@
 
     window.addEventListener('pointerdown', (e) => {
       if (e.target.closest('#ui-container') || e.target.closest('#game-menu-modal')) return;
+      
+      // 카메라 회전 모드일 때는 물체 레이캐스팅 및 이동 로직 차단 (화면 회전에 집중)
+      if (isCameraMode) return;
+
       updateTouchPos(e);
       lastTouchPos.copy(touchPos);
 
@@ -531,8 +467,6 @@
       }
 
       // 기물 및 피규어 레이캐스팅
-      if (isCameraMode) return;
-
       const allMeshes = [];
       Object.values(objects).forEach(o => {
         if (o.mesh.isGroup) {
@@ -554,6 +488,8 @@
     });
 
     window.addEventListener('pointermove', (e) => {
+      if (isCameraMode) return;
+
       updateTouchPos(e);
       raycaster.setFromCamera(touchPos, camera);
 
@@ -568,7 +504,7 @@
         return;
       }
 
-      if (selectedObject && !isCameraMode) {
+      if (selectedObject) {
         if (selectedObject.body) {
           const dx = (touchPos.x - lastTouchPos.x) * 12;
           const dy = (touchPos.y - lastTouchPos.y) * 12;
@@ -598,8 +534,7 @@
       selectedObject = null;
     });
 
-    // UI 모달 핸들러
-    let isCameraMode = false;
+    // ===== 7. UI 및 카메라 모드 토글 액션 =====
     document.getElementById('menu-btn').addEventListener('click', () => {
       const modal = document.getElementById('game-menu-modal');
       modal.style.display = modal.style.display === 'block' ? 'none' : 'block';
@@ -613,13 +548,22 @@
     document.getElementById('reset-btn').addEventListener('click', () => socket.emit('reset-game'));
     document.getElementById('dice-btn').addEventListener('click', () => socket.emit('roll-dice'));
 
+    // 카메라 모드 버튼 클릭 이벤트
     const modeBtn = document.getElementById('mode-btn');
     modeBtn.addEventListener('click', () => {
       isCameraMode = !isCameraMode;
-      controls.enableRotate = isCameraMode;
-      modeBtn.textContent = isCameraMode ? "물체 이동 모드" : "카메라 회전 모드";
-      if (isCameraMode) modeBtn.classList.add('camera-mode');
-      else modeBtn.classList.remove('camera-mode');
+      
+      // OrbitControls 카메라 제어기 활성화/비활성화
+      controls.enabled = isCameraMode;
+      
+      modeBtn.textContent = isCameraMode ? "카메라 회전 중 (클릭 시 이동 모드)" : "카메라 회전 모드";
+      if (isCameraMode) {
+        modeBtn.classList.add('camera-mode');
+        showToast('🎥 화면을 드래그하여 카메라 각도를 회전해보세요!');
+      } else {
+        modeBtn.classList.remove('camera-mode');
+        showToast('🖱️ 물체 이동 모드로 변경되었습니다.');
+      }
     });
 
     function showToast(msg) {
@@ -645,7 +589,7 @@
 
       Object.values(flyingCards).forEach(card => card.update(delta));
 
-      controls.update();
+      controls.update(); // OrbitControls 애니메이션 업데이트
       renderer.render(scene, camera);
     }
     animate();
