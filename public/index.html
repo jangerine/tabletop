@@ -123,10 +123,18 @@
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableRotate = false;
 
-    // 2. 물리 세계 설정 (Cannon.js)
+    // 2. 물리 세계 설정 (마찰력 상향)
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
-    world.solver.iterations = 15; // 물리 반복 계산을 올려 정확도 향상
+    world.solver.iterations = 20; // 정교한 계산을 위해 연산 증가
+
+    // 재질 마찰력 설정 (젠가 블록 간 덜 미끄러지게 설정)
+    const jengaMaterial = new CANNON.Material('jengaMat');
+    const jengaContactMat = new CANNON.ContactMaterial(jengaMaterial, jengaMaterial, {
+      friction: 0.6,      // 마찰력 부여하여 손대지 않을 때 덜 무너짐
+      restitution: 0.0,   // 반발력 0으로 제거 (튕겨나가지 않도록)
+    });
+    world.addContactMaterial(jengaContactMat);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
@@ -144,7 +152,7 @@
     tableMesh.receiveShadow = true;
     scene.add(tableMesh);
 
-    const tableBody = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(7, 0.2, 7)) });
+    const tableBody = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(7, 0.2, 7)), material: jengaMaterial });
     tableBody.position.set(0, -0.2, 0);
     world.addBody(tableBody);
 
@@ -153,8 +161,7 @@
     let currentGameType = 'jenga';
 
     const jengaGeo = new THREE.BoxGeometry(3, 0.6, 1);
-    // 물리 히트박스를 아주 살짝 좁혀 연쇄 겹침 충돌 방지
-    const jengaShape = new CANNON.Box(new CANNON.Vec3(1.48, 0.29, 0.48));
+    const jengaShape = new CANNON.Box(new CANNON.Vec3(1.47, 0.29, 0.47));
 
     function clearScene() {
       Object.keys(objects).forEach(id => {
@@ -168,15 +175,15 @@
       let mesh, body;
 
       if (data.type === 'jenga_block') {
-        const mat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 });
+        const mat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.4 });
         mesh = new THREE.Mesh(jengaGeo, mat);
         
-        // 무게(mass)를 0.5로 늘리고 linearDamping/angularDamping을 0.8로 올려 흔들림 차단
         body = new CANNON.Body({
-          mass: 0.5,
+          mass: 0.8, // 무게를 올려 밀었을 때 급격하게 날아가지 않도록 보정
           shape: jengaShape,
-          linearDamping: 0.8,
-          angularDamping: 0.8
+          material: jengaMaterial,
+          linearDamping: 0.85, // 이동 시 저항 추가
+          angularDamping: 0.85 // 회전 시 저항 추가
         });
         body.position.set(data.x, data.y, data.z);
         body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), data.rotY);
@@ -242,9 +249,10 @@
       else modeBtn.classList.remove('camera-mode');
     });
 
-    // 드래그/터치 제어
+    // 💡 모바일 인터랙션 보정 (드래그 델타값으로 살살 밀기)
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
+    let lastTouchPos = new THREE.Vector2();
     const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     let selectedObject = null;
 
@@ -258,6 +266,7 @@
     window.addEventListener('pointerdown', (e) => {
       if (isCameraMode || e.target.closest('#ui-container') || e.target.closest('#game-menu-modal')) return;
       updateTouchPos(e);
+      lastTouchPos.copy(touchPos);
 
       raycaster.setFromCamera(touchPos, camera);
       const meshes = Object.values(objects).map(o => o.mesh);
@@ -274,8 +283,12 @@
       updateTouchPos(e);
 
       if (selectedObject.body) {
-        const forceVec = new CANNON.Vec3(touchPos.x * 2, 0, -touchPos.y * 2);
-        selectedObject.body.applyImpulse(forceVec, selectedObject.body.position);
+        // 모바일 터치 움직임 감도를 0.08로 대폭 줄여 섬세한 컨트롤 지원
+        const deltaX = (touchPos.x - lastTouchPos.x) * 0.08;
+        const deltaY = (touchPos.y - lastTouchPos.y) * 0.08;
+
+        const forceVec = new CANNON.Vec3(deltaX * 5, 0, -deltaY * 5);
+        selectedObject.body.velocity.vadd(forceVec, selectedObject.body.velocity);
 
         const b = selectedObject.body;
         socket.emit('move-object', {
@@ -295,6 +308,8 @@
           });
         }
       }
+
+      lastTouchPos.copy(touchPos);
     });
 
     window.addEventListener('pointerup', () => { selectedObject = null; });
