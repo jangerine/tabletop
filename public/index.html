@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Virtual Tabletop Simulator</title>
+  <title>Virtual Tabletop Simulator Platform</title>
   <style>
     * {
       touch-action: manipulation;
@@ -99,12 +99,11 @@
 
   <div id="toast"></div>
 
-  <!-- 요청하신 소품 추가 메뉴 구성 -->
   <div id="game-menu-modal">
     <h3>보드판 소품 추가</h3>
     <button class="menu-item" onclick="addObjects('dice')">🎲 주사위 2개 추가</button>
     <button class="menu-item" onclick="addObjects('figures')">♟️ 피규어 & 토큰 추가</button>
-    <button class="menu-item" onclick="addObjects('cards')">🃏 3D 플라잉 카드 추가</button>
+    <button class="menu-item" onclick="addObjects('cards')">🃏 원카드 덱 추가</button>
     <button class="menu-item" onclick="addObjects('jenga')">🪵 3D 젠가 타워 설치</button>
   </div>
 
@@ -116,7 +115,7 @@
   <script>
     const socket = io();
 
-    // ===== 1. Three.js 기본 씬 설정 =====
+    // ===== 1. Three.js 설정 =====
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f172a);
 
@@ -138,7 +137,6 @@
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 메인 보드 테이블
     const tableMesh = new THREE.Mesh(
       new THREE.BoxGeometry(14, 0.4, 14),
       new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
@@ -158,9 +156,9 @@
     tableBody.position.set(0, -0.2, 0);
     world.addBody(tableBody);
 
-    // ===== 3. 선명한 텍스처 생성기 (주사위 눈금 & 카드 문양) =====
+    // ===== 3. 고해상도 원카드 텍스처 생성기 =====
 
-    // 주사위 6개 면 텍스처 생성 (1~6 눈금)
+    // 주사위 텍스처
     function createDiceMaterials() {
       const materials = [];
       const dotsMap = {
@@ -177,11 +175,9 @@
         canvas.width = 256; canvas.height = 256;
         const ctx = canvas.getContext('2d');
 
-        // 흰색 배경 & 회색 테두리
         ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
         ctx.lineWidth = 12; ctx.strokeStyle = '#e2e8f0'; ctx.strokeRect(6, 6, 244, 244);
 
-        // 검은색/빨간색 눈금 점
         ctx.fillStyle = num === 1 ? '#dc2626' : '#0f172a';
         dotsMap[num].forEach(([x, y]) => {
           ctx.beginPath();
@@ -190,38 +186,77 @@
         });
 
         const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
         materials.push(new THREE.MeshStandardMaterial({ map: texture, roughness: 0.2 }));
       }
       return materials;
     }
 
-    // 카드 앞면 텍스처
+    // 원카드 카드 앞면 텍스처 (숫자 + 문양 + 귀퉁이 상징)
     function createCardFrontTexture(suit, value, color) {
       const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 384;
+      canvas.width = 512; canvas.height = 768;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 384);
-      ctx.lineWidth = 12; ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(6, 6, 244, 372);
-      ctx.fillStyle = color; ctx.font = 'bold 48px sans-serif'; ctx.fillText(value, 20, 60);
-      ctx.font = 'bold 80px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(suit, 128, 220);
-      return new THREE.CanvasTexture(canvas);
+
+      // 베이스 카드 바디
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 768);
+      ctx.lineWidth = 16; ctx.strokeStyle = '#e2e8f0'; ctx.strokeRect(12, 12, 488, 744);
+
+      // 모서리 숫자/문양 (좌상단 & 우하단)
+      ctx.fillStyle = color;
+      ctx.font = 'bold 72px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(value, 35, 90);
+      ctx.font = 'bold 64px sans-serif';
+      ctx.fillText(suit, 35, 160);
+
+      // 우하단 대칭 회전 렌더링
+      ctx.save();
+      ctx.translate(512, 768);
+      ctx.rotate(Math.PI);
+      ctx.font = 'bold 72px sans-serif';
+      ctx.fillText(value, 35, 90);
+      ctx.font = 'bold 64px sans-serif';
+      ctx.fillText(suit, 35, 160);
+      ctx.restore();
+
+      // 중앙 메인 문양
+      ctx.font = 'bold 180px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(suit, 256, 440);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
     }
 
-    // 카드 뒷면 텍스처
+    // 원카드 카드 뒷면 텍스처 (레드 클래식 패턴)
     function createCardBackTexture() {
       const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 384;
+      canvas.width = 512; canvas.height = 768;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, 256, 384);
-      ctx.lineWidth = 10; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(10, 10, 236, 364);
+
+      ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, 512, 768);
+      ctx.lineWidth = 16; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(16, 16, 480, 736);
+
       ctx.fillStyle = '#991b1b';
-      for(let i=24; i<232; i+=20) {
-        for(let j=24; j<360; j+=20) ctx.fillRect(i, j, 10, 10);
+      for (let i = 36; i < 476; i += 32) {
+        for (let j = 36; j < 732; j += 32) {
+          ctx.fillRect(i, j, 16, 16);
+        }
       }
-      return new THREE.CanvasTexture(canvas);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 48px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ONE CARD', 256, 390);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
     }
 
-    // ===== 4. 플라잉 카드 물리 제어 클래스 =====
+    // ===== 4. 플라잉 카드 클래스 =====
     class FlyingCardPhysics {
       constructor(mesh, id) {
         this.mesh = mesh;
@@ -339,7 +374,7 @@
       }
     }
 
-    // ===== 5. 오브젝트 생성 로직 =====
+    // ===== 5. 3D 메쉬 생성기 =====
     const objects = {};
     const flyingCards = {};
 
@@ -361,13 +396,11 @@
 
     function createPiece(data) {
       if (data.type === 'flying_card') {
+        const sideMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
         const mat = [
-          new THREE.MeshStandardMaterial({ color: 0xcccccc }),
-          new THREE.MeshStandardMaterial({ color: 0xcccccc }),
-          new THREE.MeshStandardMaterial({ color: 0xcccccc }),
-          new THREE.MeshStandardMaterial({ color: 0xcccccc }),
-          new THREE.MeshStandardMaterial({ map: createCardFrontTexture(data.suit, data.value, data.color), roughness: 0.3 }),
-          new THREE.MeshStandardMaterial({ map: createCardBackTexture(), roughness: 0.3 })
+          sideMat, sideMat, sideMat, sideMat,
+          new THREE.MeshStandardMaterial({ map: createCardFrontTexture(data.suit, data.value, data.color), roughness: 0.2 }), // index 4: 앞면
+          new THREE.MeshStandardMaterial({ map: createCardBackTexture(), roughness: 0.2 })  // index 5: 뒷면
         ];
         const mesh = new THREE.Mesh(cardGeo, mat);
         mesh.position.set(data.x, data.y, data.z);
@@ -386,7 +419,6 @@
         body.position.set(data.x, data.y, data.z);
         body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), data.rotY);
       } else if (data.type === 'dice') {
-        // 주사위 6개 면 텍스처 적용
         mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), createDiceMaterials());
         body = new CANNON.Body({ mass: 0.5, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)), material: boardMaterial });
         body.position.set(data.x, data.y, data.z);
@@ -419,7 +451,7 @@
       objects[data.id] = { mesh, body };
     }
 
-    // 소켓 이벤트
+    // 소켓 수신
     socket.on('init-physics-objects', (data) => {
       clearAll();
       Object.values(data).forEach(createPiece);
@@ -446,14 +478,14 @@
         }
       });
       if (diceFound) showToast('🎲 주사위를 던졌습니다!');
-      else showToast('보드판에 주사위가 없습니다. 먼저 추가해 주세요!');
+      else showToast('보드판에 주사위가 없습니다!');
     });
 
     socket.on('flip-card-action', (data) => {
       if (flyingCards[data.id]) flyingCards[data.id].flip();
     });
 
-    // ===== 6. 터치 및 Raycasting 오버랩 제어 =====
+    // ===== 6. Raycasting 오버랩 인터랙션 =====
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
     let lastTouchPos = new THREE.Vector2();
@@ -498,7 +530,7 @@
         return;
       }
 
-      // 기물 및 피규어/주사위의 레이캐스팅
+      // 기물 및 피규어 레이캐스팅
       if (isCameraMode) return;
 
       const allMeshes = [];
@@ -566,7 +598,7 @@
       selectedObject = null;
     });
 
-    // UI 모달 및 소품 추가 액션
+    // UI 모달 핸들러
     let isCameraMode = false;
     document.getElementById('menu-btn').addEventListener('click', () => {
       const modal = document.getElementById('game-menu-modal');
