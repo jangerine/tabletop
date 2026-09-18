@@ -1,97 +1,646 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Virtual Tabletop Simulator Platform</title>
+  <style>
+    * {
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #ui-container {
+      position: absolute;
+      top: 12px; left: 12px; right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .btn-group { display: flex; gap: 6px; pointer-events: auto; }
+    .btn {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 13px;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    #menu-btn { background: #8b5cf6; }
+    #reset-btn { background: #dc2626; }
+    #dice-btn { background: #f59e0b; }
+    #mode-btn.camera-mode { background: #059669; }
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+    #game-menu-modal {
+      display: none;
+      position: absolute;
+      top: 60px; left: 12px;
+      background: rgba(24, 24, 27, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 16px;
+      z-index: 100;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+      width: 230px;
+    }
+    #game-menu-modal h3 { color: white; margin: 0 0 12px 0; font-size: 15px; text-align: center; }
+    .menu-item {
+      display: block; width: 100%; padding: 12px; margin-bottom: 8px;
+      background: #27272a; color: white; border: none; border-radius: 10px;
+      font-size: 14px; font-weight: 600; text-align: left; cursor: pointer;
+    }
+    .menu-item:hover, .menu-item:active { background: #3f3f46; }
 
-const PORT = process.env.PORT || 3000;
+    #help-panel {
+      position: absolute;
+      bottom: 12px; left: 12px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white; padding: 10px 16px; border-radius: 12px;
+      font-size: 12px; pointer-events: none; z-index: 10;
+      backdrop-filter: blur(4px); line-height: 1.4;
+    }
+    #help-panel b { color: #38bdf8; }
 
-app.use(express.static(path.join(__dirname, 'public')));
+    #toast {
+      position: absolute; top: 110px; left: 50%;
+      transform: translateX(-50%); background: #10b981; color: white;
+      padding: 10px 20px; border-radius: 25px; font-weight: bold; display: none; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui-container">
+    <div class="btn-group">
+      <button id="menu-btn" class="btn">🎮 소품 추가 메뉴</button>
+      <button id="dice-btn" class="btn">🎲 주사위 굴리기</button>
+      <button id="reset-btn" class="btn">판 비우기</button>
+    </div>
+    <button id="mode-btn" class="btn">카메라 회전 모드</button>
+  </div>
 
-let gameObjects = {};
-let cardCount = 0;
+  <div id="help-panel">
+    🖱️ <b>기물 이동 모드:</b> 젠가/주사위/카드 자유 드래그<br>
+    👆 <b>카드 더블 터치 / 클릭:</b> 공중 앞뒤 3D Flip 뒤집기
+  </div>
 
-function createJengaBlocks() {
-  const blocks = {};
-  const blockHeight = 0.6;
-  let idCount = 0;
+  <div id="toast"></div>
 
-  for (let floor = 0; floor < 18; floor++) {
-    const isEven = floor % 2 === 0;
-    const y = floor * 0.62 + blockHeight / 2 + 0.1;
+  <div id="game-menu-modal">
+    <h3>보드판 소품 추가</h3>
+    <button class="menu-item" onclick="addObjects('cards')">🃏 원카드 덱 추가</button>
+    <button class="menu-item" onclick="addObjects('jenga')">🪵 3D 젠가 타워 설치</button>
+    <button class="menu-item" onclick="addObjects('dice')">🎲 주사위 2개 추가</button>
+    <button class="menu-item" onclick="addObjects('figures')">♟️ 피규어 & 토큰 추가</button>
+  </div>
 
-    for (let i = 0; i < 3; i++) {
-      const id = `jenga_${idCount++}`;
-      const offset = (i - 1) * 1.05;
-      blocks[id] = {
-        id, type: 'jenga_block',
-        x: isEven ? 0 : offset, y, z: isEven ? offset : 0,
-        rotY: isEven ? 0 : Math.PI / 2, color: 0xd2b48c
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    const socket = io();
+
+    // ===== 1. Three.js 설정 =====
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 11, 12);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enabled = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(10, 20, 10);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    const tableMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(14, 0.4, 14),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
+    );
+    tableMesh.position.y = -0.2;
+    tableMesh.receiveShadow = true;
+    scene.add(tableMesh);
+
+    // ===== 2. Cannon.js 물리 엔진 =====
+    const world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
+    world.allowSleep = true;
+
+    const boardMaterial = new CANNON.Material('boardMat');
+    world.addContactMaterial(new CANNON.ContactMaterial(boardMaterial, boardMaterial, { friction: 0.2, restitution: 0.0 }));
+
+    const tableBody = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(7, 0.2, 7)), material: boardMaterial });
+    tableBody.position.set(0, -0.2, 0);
+    world.addBody(tableBody);
+
+    // ===== 3. 텍스처 생성기 =====
+    function createDiceMaterials() {
+      const materials = [];
+      const dotsMap = {
+        1: [[128, 128]], 2: [[70, 70], [186, 186]], 3: [[70, 70], [128, 128], [186, 186]],
+        4: [[70, 70], [186, 70], [70, 186], [186, 186]],
+        5: [[70, 70], [186, 70], [128, 128], [70, 186], [186, 186]],
+        6: [[70, 70], [186, 70], [70, 128], [186, 128], [70, 186], [186, 186]]
       };
-    }
-  }
-  return blocks;
-}
 
-io.on('connection', (socket) => {
-  socket.emit('init-physics-objects', gameObjects);
+      for (let num = 1; num <= 6; num++) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
+        ctx.lineWidth = 12; ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(6, 6, 244, 244);
+        ctx.fillStyle = num === 1 ? '#dc2626' : '#0f172a';
+        dotsMap[num].forEach(([x, y]) => {
+          ctx.beginPath(); ctx.arc(x, y, num === 1 ? 32 : 22, 0, Math.PI * 2); ctx.fill();
+        });
 
-  socket.on('add-objects', (type) => {
-    if (type === 'clear') {
-      gameObjects = {};
-    } else if (type === 'dice') {
-      gameObjects['dice1'] = { id: 'dice1', type: 'dice', x: -1.5, y: 1, z: 0, color: 0xffffff };
-      gameObjects['dice2'] = { id: 'dice2', type: 'dice', x: 1.5, y: 1, z: 0, color: 0xffffff };
-    } else if (type === 'figures') {
-      gameObjects['figure_red'] = { id: 'figure_red', type: 'figure', x: -2, y: 0.6, z: -2, color: 0xef4444 };
-      gameObjects['figure_blue'] = { id: 'figure_blue', type: 'figure', x: 2, y: 0.6, z: 2, color: 0x3b82f6 };
-      gameObjects['token_yellow'] = { id: 'token_yellow', type: 'token', x: -1, y: 0.2, z: 1, color: 0xeab308 };
-      gameObjects['token_green'] = { id: 'token_green', type: 'token', x: 1, y: 0.2, z: 1, color: 0x10b981 };
-    } else if (type === 'cards') {
-      const suits = ['♠', '♥', '♦', '♣', '♠', '♥', '♦', '♣'];
-      const values = ['A', '2', '7', 'J', 'Q', 'K', '3', '10'];
-      for (let i = 0; i < 4; i++) {
-        const id = `flying_card_${cardCount++}`;
-        const suit = suits[cardCount % suits.length];
-        const val = values[cardCount % values.length];
-        gameObjects[id] = {
-          id, type: 'flying_card',
-          x: -2.2 + (i % 4) * 1.5, y: 0.05, z: 0,
-          suit: suit, value: val,
-          color: (suit === '♥' || suit === '♦') ? '#dc2626' : '#0f172a'
-        };
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        materials.push(new THREE.MeshStandardMaterial({ map: texture, roughness: 0.3, metalness: 0.0 }));
       }
-    } else if (type === 'jenga') {
-      gameObjects = createJengaBlocks();
+      return materials;
     }
 
-    io.emit('init-physics-objects', gameObjects);
-  });
+    function createCardFrontTexture(suit, value, color) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512; canvas.height = 768;
+      const ctx = canvas.getContext('2d');
 
-  socket.on('move-object', (data) => {
-    if (gameObjects[data.id]) {
-      Object.assign(gameObjects[data.id], data);
-      socket.broadcast.emit('update-object', data);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 768);
+      ctx.lineWidth = 20; ctx.strokeStyle = '#94a3b8'; ctx.strokeRect(10, 10, 492, 748);
+
+      ctx.fillStyle = color;
+      ctx.font = 'bold 80px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(value, 35, 100);
+      ctx.font = 'bold 70px sans-serif'; ctx.fillText(suit, 35, 175);
+
+      ctx.save();
+      ctx.translate(512, 768); ctx.rotate(Math.PI);
+      ctx.font = 'bold 80px sans-serif'; ctx.fillText(value, 35, 100);
+      ctx.font = 'bold 70px sans-serif'; ctx.fillText(suit, 35, 175);
+      ctx.restore();
+
+      ctx.font = 'bold 200px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(suit, 256, 450);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
     }
-  });
 
-  socket.on('roll-dice', () => {
-    io.emit('roll-dice-action');
-  });
+    function createCardBackTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512; canvas.height = 768;
+      const ctx = canvas.getContext('2d');
 
-  socket.on('flip-card', (cardId) => {
-    io.emit('flip-card-action', { id: cardId });
-  });
+      ctx.fillStyle = '#dc2626'; ctx.fillRect(0, 0, 512, 768);
+      ctx.lineWidth = 20; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(12, 12, 488, 744);
 
-  socket.on('reset-game', () => {
-    gameObjects = {};
-    io.emit('init-physics-objects', gameObjects);
-  });
-});
+      ctx.fillStyle = '#b91c1c';
+      for (let i = 32; i < 480; i += 32) {
+        for (let j = 32; j < 736; j += 32) ctx.fillRect(i, j, 16, 16);
+      }
 
-server.listen(PORT, () => {
-  console.log(`TTS 서버 실행 중: 포트 ${PORT}`);
-});
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 52px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('ONE CARD', 256, 395);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
+    }
+
+    // ===== 4. 앞뒤 뒤집기 회전축 보정된 플라잉 카드 physics =====
+    class FlyingCardPhysics {
+      constructor(mesh, id) {
+        this.mesh = mesh;
+        this.id = id;
+        this.isDragging = false;
+        this.pos = new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z);
+        this.velocity = new THREE.Vector2(0, 0);
+
+        // Z축 기반 앞뒤 뒤집기 회전각 (BoxGeometry 표준 축 대응)
+        this.baseRotZ = 0;
+        this.tiltRot = new THREE.Euler(0, 0, 0);
+
+        this.targetY = 0.8;
+        this.isFlying = false;
+        this.flyProgress = 0;
+        this.flyDuration = 0.4;
+        this.startPos = new THREE.Vector3();
+        this.targetPos = new THREE.Vector3();
+
+        this.isFlipping = false;
+        this.flipProgress = 0;
+        this.flipDuration = 0.4;
+        this.startRotZ = 0;
+        this.targetRotZ = 0;
+      }
+
+      onDragStart() { this.isDragging = true; this.isFlying = false; this.targetY = 0.8; }
+      onDragMove(targetWorldPos) {
+        if (!this.isDragging || isNaN(targetWorldPos.x) || isNaN(targetWorldPos.z)) return;
+        this.velocity.x = targetWorldPos.x - this.pos.x;
+        this.velocity.z = targetWorldPos.z - this.pos.z;
+        this.pos.x = targetWorldPos.x;
+        this.pos.z = targetWorldPos.z;
+      }
+      onDragEnd() {
+        if (!this.isDragging) return;
+        this.isDragging = false; this.isFlying = true; this.flyProgress = 0;
+        this.startPos.copy(this.pos);
+        const throwX = THREE.MathUtils.clamp(this.pos.x + this.velocity.x * 1.5, -6, 6);
+        const throwZ = THREE.MathUtils.clamp(this.pos.z + this.velocity.z * 1.5, -6, 6);
+        this.targetPos.set(throwX, 0.05, throwZ);
+      }
+
+      // 정확히 앞뒤로 flip
+      flip() {
+        if (this.isFlipping) return;
+        this.isFlipping = true;
+        this.flipProgress = 0;
+        this.startRotZ = this.baseRotZ;
+        this.targetRotZ = this.baseRotZ + Math.PI; // Z축 180도 뒤집기
+
+        if (!this.isDragging && !this.isFlying) {
+          this.isFlying = true;
+          this.flyProgress = 0;
+          this.startPos.copy(this.pos);
+          this.targetPos.copy(this.pos);
+        }
+      }
+
+      update(delta) {
+        if (this.isFlipping) {
+          this.flipProgress += delta / this.flipDuration;
+          if (this.flipProgress >= 1) {
+            this.flipProgress = 1;
+            this.isFlipping = false;
+            this.baseRotZ = this.targetRotZ % (Math.PI * 2);
+          }
+          const t = this.flipProgress;
+          const easeT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+          this.baseRotZ = THREE.MathUtils.lerp(this.startRotZ, this.targetRotZ, easeT);
+        }
+
+        if (this.isDragging) {
+          this.pos.y += (this.targetY - this.pos.y) * 0.2;
+          const targetTiltX = -this.velocity.z * 0.5;
+          const targetTiltZ = -this.velocity.x * 0.5;
+          this.tiltRot.x += (targetTiltX - this.tiltRot.x) * 0.2;
+          this.tiltRot.z += (targetTiltZ - this.tiltRot.z) * 0.2;
+          this.velocity.multiplyScalar(0.7);
+        } else if (this.isFlying) {
+          this.flyProgress += delta / this.flyDuration;
+          if (this.flyProgress >= 1) { this.flyProgress = 1; this.isFlying = false; }
+          const t = this.flyProgress;
+          const easeT = 1 - Math.pow(1 - t, 3);
+          this.pos.x = THREE.MathUtils.lerp(this.startPos.x, this.targetPos.x, easeT);
+          this.pos.z = THREE.MathUtils.lerp(this.startPos.z, this.targetPos.z, easeT);
+          const peakHeight = this.isFlipping ? 1.5 : 0.6;
+          const arcHeight = Math.sin(t * Math.PI) * peakHeight;
+          this.pos.y = THREE.MathUtils.lerp(this.startPos.y, this.targetPos.y, easeT) + arcHeight;
+          this.tiltRot.x += (0 - this.tiltRot.x) * 0.2;
+          this.tiltRot.z += (0 - this.tiltRot.z) * 0.2;
+        }
+
+        this.mesh.position.copy(this.pos);
+
+        // Z축 기준 180도 뒤집기 쿼터니언 계산 적용
+        const qBase = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.baseRotZ);
+        const qTilt = new THREE.Quaternion().setFromEuler(this.tiltRot);
+        this.mesh.quaternion.copy(qTilt.multiply(qBase));
+      }
+    }
+
+    // ===== 5. 3D 메쉬 생성기 =====
+    const objects = {};
+    const flyingCards = {};
+    const jengaGeo = new THREE.BoxGeometry(3, 0.6, 1);
+    const jengaShape = new CANNON.Box(new CANNON.Vec3(1.48, 0.29, 0.48));
+    const cardGeo = new THREE.BoxGeometry(1.6, 0.02, 2.4);
+
+    function clearAll() {
+      Object.keys(objects).forEach(id => {
+        scene.remove(objects[id].mesh);
+        if (objects[id].body) world.remove(objects[id].body);
+        delete objects[id];
+      });
+      Object.keys(flyingCards).forEach(id => {
+        scene.remove(flyingCards[id].mesh);
+        delete flyingCards[id];
+      });
+    }
+
+    function createPiece(data) {
+      if (data.type === 'flying_card') {
+        const sideMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8 });
+        const frontTexture = createCardFrontTexture(data.suit, data.value, data.color);
+        const backTexture = createCardBackTexture();
+
+        // BoxGeometry 재질 매핑 보정 (2번: 상단/앞면, 3번: 하단/뒷면)
+        const matArray = [
+          sideMat, sideMat,
+          new THREE.MeshStandardMaterial({ map: frontTexture, roughness: 0.3 }),
+          new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.3 }),
+          sideMat, sideMat
+        ];
+
+        const mesh = new THREE.Mesh(cardGeo, matArray);
+        mesh.position.set(data.x, data.y, data.z);
+        mesh.castShadow = true;
+        mesh.userData = { id: data.id, type: 'flying_card' };
+        scene.add(mesh);
+
+        flyingCards[data.id] = new FlyingCardPhysics(mesh, data.id);
+        return;
+      }
+
+      let mesh, body;
+      if (data.type === 'jenga_block') {
+        mesh = new THREE.Mesh(jengaGeo, new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.4 }));
+        body = new CANNON.Body({ mass: 0.3, shape: jengaShape, material: boardMaterial });
+        body.position.set(data.x, data.y, data.z);
+        body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), data.rotY);
+      } else if (data.type === 'dice') {
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), createDiceMaterials());
+        body = new CANNON.Body({ mass: 0.5, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)), material: boardMaterial });
+        body.position.set(data.x, data.y, data.z);
+      } else if (data.type === 'figure') {
+        const group = new THREE.Group();
+        const baseMat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 });
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.3, 16), baseMat);
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), baseMat);
+        head.position.y = 0.5;
+        base.castShadow = true; head.castShadow = true;
+        group.add(base); group.add(head);
+        base.userData = { id: data.id }; head.userData = { id: data.id };
+
+        mesh = group;
+        body = new CANNON.Body({ mass: 0.4, shape: new CANNON.Cylinder(0.5, 0.6, 0.8, 16), material: boardMaterial });
+        body.position.set(data.x, data.y, data.z);
+      } else {
+        mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.2, 32), new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 }));
+        body = new CANNON.Body({ mass: 0.2, shape: new CANNON.Cylinder(0.6, 0.6, 0.2, 16), material: boardMaterial });
+        body.position.set(data.x, data.y, data.z);
+      }
+
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData = { id: data.id, type: data.type };
+      scene.add(mesh);
+      world.addBody(body);
+      objects[data.id] = { mesh, body };
+    }
+
+    // 소켓 수신
+    socket.on('init-physics-objects', (data) => {
+      clearAll();
+      Object.values(data).forEach(createPiece);
+    });
+
+    socket.on('update-object', (data) => {
+      if (flyingCards[data.id]) {
+        const card = flyingCards[data.id];
+        if (!card.isDragging) card.pos.set(data.x, data.y, data.z);
+      } else if (objects[data.id] && objects[data.id].body) {
+        const b = objects[data.id].body;
+        if (selectedObject && (selectedObject.mesh.userData.id === data.id || (selectedObject.mesh.children[0] && selectedObject.mesh.children[0].userData.id === data.id))) {
+          return;
+        }
+        b.position.set(data.x, data.y, data.z);
+        if (data.qx !== undefined) b.quaternion.set(data.qx, data.qy, data.qz, data.qw);
+      }
+    });
+
+    socket.on('roll-dice-action', () => {
+      let diceFound = false;
+      Object.values(objects).forEach(obj => {
+        if (obj.mesh.userData && obj.mesh.userData.type === 'dice') {
+          obj.body.wakeUp();
+          obj.body.velocity.set((Math.random() - 0.5) * 8, 7 + Math.random() * 5, (Math.random() - 0.5) * 8);
+          obj.body.angularVelocity.set(Math.random() * 12, Math.random() * 12, Math.random() * 12);
+          diceFound = true;
+        }
+      });
+      if (diceFound) showToast('🎲 주사위를 던졌습니다!');
+      else showToast('보드판에 주사위가 없습니다!');
+    });
+
+    socket.on('flip-card-action', (data) => {
+      if (flyingCards[data.id]) flyingCards[data.id].flip();
+    });
+
+    // ===== 6. 안전성이 보장된 드래그 & 터치 핸들러 =====
+    const raycaster = new THREE.Raycaster();
+    const touchPos = new THREE.Vector2();
+    let selectedObject = null;
+    let selectedCard = null;
+    let isCameraMode = false;
+    let lastTapTime = 0;
+
+    function updateTouchPos(e) {
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+      touchPos.x = (x / window.innerWidth) * 2 - 1;
+      touchPos.y = -(y / window.innerHeight) * 2 + 1;
+    }
+
+    const cardDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const planeIntersection = new THREE.Vector3();
+
+    window.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('#ui-container') || e.target.closest('#game-menu-modal')) return;
+      if (isCameraMode) return;
+
+      updateTouchPos(e);
+      raycaster.setFromCamera(touchPos, camera);
+
+      // 카드의 레이캐스팅
+      const cardMeshes = Object.values(flyingCards).map(c => c.mesh);
+      const cardIntersects = raycaster.intersectObjects(cardMeshes);
+
+      if (cardIntersects.length > 0) {
+        const cardId = cardIntersects[0].object.userData.id;
+        const card = flyingCards[cardId];
+
+        const currentTime = new Date().getTime();
+        if (currentTime - lastTapTime < 300 && currentTime - lastTapTime > 0) {
+          socket.emit('flip-card', cardId);
+        } else {
+          selectedCard = card;
+          selectedCard.onDragStart();
+        }
+        lastTapTime = currentTime;
+        return;
+      }
+
+      // 기물 및 피규어 레이캐스팅
+      const allMeshes = [];
+      Object.values(objects).forEach(o => {
+        if (o.mesh.isGroup) {
+          o.mesh.traverse(child => { if (child.isMesh) allMeshes.push(child); });
+        } else {
+          allMeshes.push(o.mesh);
+        }
+      });
+
+      const intersects = raycaster.intersectObjects(allMeshes);
+      if (intersects.length > 0) {
+        const hitMesh = intersects[0].object;
+        const objId = hitMesh.userData.id || (hitMesh.parent && hitMesh.parent.userData.id);
+        if (objId && objects[objId]) {
+          selectedObject = objects[objId];
+          selectedObject.body.wakeUp();
+          selectedObject.body.velocity.set(0, 0, 0);
+          selectedObject.body.angularVelocity.set(0, 0, 0);
+        }
+      }
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (isCameraMode) return;
+      updateTouchPos(e);
+      raycaster.setFromCamera(touchPos, camera);
+
+      // 1) 안전성이 보장된 카드 드래그
+      if (selectedCard) {
+        cardDragPlane.constant = 0; // 항상 바닥 좌표 평면 기준 고정
+        const hitPoint = raycaster.ray.intersectPlane(cardDragPlane, planeIntersection);
+        
+        // Raycaster 교차점이 정상적인 좌표값을 가질 때만 보정
+        if (hitPoint && !isNaN(planeIntersection.x) && !isNaN(planeIntersection.z)) {
+          selectedCard.onDragMove(planeIntersection);
+          socket.emit('move-object', {
+            id: selectedCard.id,
+            x: selectedCard.pos.x, y: selectedCard.pos.y, z: selectedCard.pos.z
+          });
+        }
+        return;
+      }
+
+      // 2) 일반 젠가 및 기물 드래그
+      if (selectedObject) {
+        cardDragPlane.constant = -selectedObject.body.position.y;
+        const hitPoint = raycaster.ray.intersectPlane(cardDragPlane, planeIntersection);
+        
+        if (hitPoint && !isNaN(planeIntersection.x) && !isNaN(planeIntersection.z)) {
+          selectedObject.body.wakeUp();
+          selectedObject.body.position.x = planeIntersection.x;
+          selectedObject.body.position.z = planeIntersection.z;
+
+          const b = selectedObject.body;
+          socket.emit('move-object', {
+            id: selectedObject.mesh.userData.id || selectedObject.mesh.children[0].userData.id,
+            x: b.position.x, y: b.position.y, z: b.position.z,
+            qx: b.quaternion.x, qy: b.quaternion.y, qz: b.quaternion.z, qw: b.quaternion.w
+          });
+        }
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      if (selectedCard) {
+        selectedCard.onDragEnd();
+        socket.emit('move-object', {
+          id: selectedCard.id,
+          x: selectedCard.pos.x, y: selectedCard.pos.y, z: selectedCard.pos.z
+        });
+        selectedCard = null;
+      }
+      if (selectedObject) {
+        selectedObject.body.wakeUp();
+        selectedObject = null;
+      }
+    });
+
+    // ===== 7. UI 핸들러 =====
+    document.getElementById('menu-btn').addEventListener('click', () => {
+      const modal = document.getElementById('game-menu-modal');
+      modal.style.display = modal.style.display === 'block' ? 'none' : 'block';
+    });
+
+    function addObjects(type) {
+      socket.emit('add-objects', type);
+      document.getElementById('game-menu-modal').style.display = 'none';
+    }
+
+    document.getElementById('reset-btn').addEventListener('click', () => socket.emit('reset-game'));
+    document.getElementById('dice-btn').addEventListener('click', () => socket.emit('roll-dice'));
+
+    const modeBtn = document.getElementById('mode-btn');
+    modeBtn.addEventListener('click', () => {
+      isCameraMode = !isCameraMode;
+      controls.enabled = isCameraMode;
+      
+      modeBtn.textContent = isCameraMode ? "카메라 회전 중 (클릭 시 이동 모드)" : "카메라 회전 모드";
+      if (isCameraMode) {
+        modeBtn.classList.add('camera-mode');
+        showToast('🎥 화면을 드래그하여 카메라 각도를 회전해보세요!');
+      } else {
+        modeBtn.classList.remove('camera-mode');
+        showToast('🖱️ 물체 이동 모드로 변경되었습니다.');
+      }
+    });
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg; toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 2000);
+    }
+
+    // 메인 루프
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+
+      world.step(1 / 60);
+
+      Object.values(objects).forEach(obj => {
+        if (obj.body) {
+          obj.mesh.position.copy(obj.body.position);
+          obj.mesh.quaternion.copy(obj.body.quaternion);
+        }
+      });
+
+      Object.values(flyingCards).forEach(card => card.update(delta));
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
