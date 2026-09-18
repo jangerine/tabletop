@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Virtual Tabletop Simulator Platform</title>
+  <title>Virtual Tabletop Simulator</title>
   <style>
     * {
       touch-action: manipulation;
@@ -43,7 +43,6 @@
     #dice-btn { background: #f59e0b; }
     #mode-btn.camera-mode { background: #059669; }
 
-    /* 모달 드롭다운 메뉴 */
     #game-menu-modal {
       display: none;
       position: absolute;
@@ -86,26 +85,27 @@
 <body>
   <div id="ui-container">
     <div class="btn-group">
-      <button id="menu-btn" class="btn">🎮 게임 메뉴</button>
-      <button id="reset-btn" class="btn">판 초기화</button>
+      <button id="menu-btn" class="btn">🎮 소품 추가 메뉴</button>
       <button id="dice-btn" class="btn">🎲 주사위 굴리기</button>
+      <button id="reset-btn" class="btn">판 비우기</button>
     </div>
     <button id="mode-btn" class="btn">카메라 회전 모드</button>
   </div>
 
   <div id="help-panel">
-    🖱️ <b>드래그:</b> 물체/카드 공중 이동 및 관성 틸트<br>
-    👆 <b>카드 더블 클릭/터치:</b> 공중 3D Flip 뒤집기
+    🖱️ <b>드래그:</b> 3D 기물 및 플라잉 카드 이동<br>
+    👆 <b>카드 더블 터치 / 클릭:</b> 공중 3D Flip 뒤집기
   </div>
 
   <div id="toast"></div>
 
-  <!-- 요청하신 메뉴 구성 -->
+  <!-- 요청하신 소품 추가 메뉴 구성 -->
   <div id="game-menu-modal">
-    <h3>보드게임 모드 선택</h3>
-    <button class="menu-item" onclick="selectGame('dice')">🎲 주사위 & 피규어 보드</button>
-    <button class="menu-item" onclick="selectGame('cards')">🃏 3D 플라잉 카드</button>
-    <button class="menu-item" onclick="selectGame('jenga')">🪵 3D 젠가 (Jenga)</button>
+    <h3>보드판 소품 추가</h3>
+    <button class="menu-item" onclick="addObjects('dice')">🎲 주사위 2개 추가</button>
+    <button class="menu-item" onclick="addObjects('figures')">♟️ 피규어 & 토큰 추가</button>
+    <button class="menu-item" onclick="addObjects('cards')">🃏 3D 플라잉 카드 추가</button>
+    <button class="menu-item" onclick="addObjects('jenga')">🪵 3D 젠가 타워 설치</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -116,7 +116,7 @@
   <script>
     const socket = io();
 
-    // ===== 1. Three.js 설정 =====
+    // ===== 1. Three.js 기본 씬 설정 =====
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f172a);
 
@@ -132,13 +132,13 @@
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableRotate = false;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
     dirLight.position.set(10, 20, 10);
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 테이블
+    // 메인 보드 테이블
     const tableMesh = new THREE.Mesh(
       new THREE.BoxGeometry(14, 0.4, 14),
       new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
@@ -158,7 +158,70 @@
     tableBody.position.set(0, -0.2, 0);
     world.addBody(tableBody);
 
-    // ===== 3. 플라잉 카드 물리 제어 클래스 =====
+    // ===== 3. 선명한 텍스처 생성기 (주사위 눈금 & 카드 문양) =====
+
+    // 주사위 6개 면 텍스처 생성 (1~6 눈금)
+    function createDiceMaterials() {
+      const materials = [];
+      const dotsMap = {
+        1: [[128, 128]],
+        2: [[70, 70], [186, 186]],
+        3: [[70, 70], [128, 128], [186, 186]],
+        4: [[70, 70], [186, 70], [70, 186], [186, 186]],
+        5: [[70, 70], [186, 70], [128, 128], [70, 186], [186, 186]],
+        6: [[70, 70], [186, 70], [70, 128], [186, 128], [70, 186], [186, 186]]
+      };
+
+      for (let num = 1; num <= 6; num++) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        // 흰색 배경 & 회색 테두리
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
+        ctx.lineWidth = 12; ctx.strokeStyle = '#e2e8f0'; ctx.strokeRect(6, 6, 244, 244);
+
+        // 검은색/빨간색 눈금 점
+        ctx.fillStyle = num === 1 ? '#dc2626' : '#0f172a';
+        dotsMap[num].forEach(([x, y]) => {
+          ctx.beginPath();
+          ctx.arc(x, y, num === 1 ? 32 : 22, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        const texture = new THREE.CanvasTexture(canvas);
+        materials.push(new THREE.MeshStandardMaterial({ map: texture, roughness: 0.2 }));
+      }
+      return materials;
+    }
+
+    // 카드 앞면 텍스처
+    function createCardFrontTexture(suit, value, color) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 384;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 384);
+      ctx.lineWidth = 12; ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(6, 6, 244, 372);
+      ctx.fillStyle = color; ctx.font = 'bold 48px sans-serif'; ctx.fillText(value, 20, 60);
+      ctx.font = 'bold 80px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(suit, 128, 220);
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // 카드 뒷면 텍스처
+    function createCardBackTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 384;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, 256, 384);
+      ctx.lineWidth = 10; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(10, 10, 236, 364);
+      ctx.fillStyle = '#991b1b';
+      for(let i=24; i<232; i+=20) {
+        for(let j=24; j<360; j+=20) ctx.fillRect(i, j, 10, 10);
+      }
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // ===== 4. 플라잉 카드 물리 제어 클래스 =====
     class FlyingCardPhysics {
       constructor(mesh, id) {
         this.mesh = mesh;
@@ -193,10 +256,8 @@
 
       onDragMove(targetWorldPos) {
         if (!this.isDragging) return;
-
         this.velocity.x = targetWorldPos.x - this.pos.x;
         this.velocity.z = targetWorldPos.z - this.pos.z;
-
         this.pos.x = targetWorldPos.x;
         this.pos.z = targetWorldPos.z;
       }
@@ -243,13 +304,11 @@
 
         if (this.isDragging) {
           this.pos.y += (this.targetY - this.pos.y) * 0.2;
-
           const targetTiltX = -this.velocity.z * 0.8;
           const targetTiltZ = -this.velocity.x * 0.8;
 
           this.tiltRot.x += (targetTiltX - this.tiltRot.x) * 0.2;
           this.tiltRot.z += (targetTiltZ - this.tiltRot.z) * 0.2;
-
           this.velocity.multiplyScalar(0.7);
         } else if (this.isFlying) {
           this.flyProgress += delta / this.flyDuration;
@@ -280,33 +339,7 @@
       }
     }
 
-    // 텍스처 생성기
-    function createCardFrontTexture(suit, value, color) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 384;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 384);
-      ctx.lineWidth = 10; ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(5, 5, 246, 374);
-      ctx.fillStyle = color; ctx.font = 'bold 44px sans-serif'; ctx.fillText(value, 20, 55);
-      ctx.font = 'bold 72px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(suit, 128, 210);
-      return new THREE.CanvasTexture(canvas);
-    }
-
-    function createCardBackTexture() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 384;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, 256, 384);
-      ctx.lineWidth = 8; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(8, 8, 240, 368);
-      ctx.fillStyle = '#991b1b';
-      for(let i=20; i<240; i+=20) {
-        for(let j=20; j<360; j+=20) ctx.fillRect(i, j, 10, 10);
-      }
-      return new THREE.CanvasTexture(canvas);
-    }
-
-    // ===== 4. 3D 기물 생성 및 레이캐스팅 버그 수정 =====
-    let currentGame = 'dice';
+    // ===== 5. 오브젝트 생성 로직 =====
     const objects = {};
     const flyingCards = {};
 
@@ -353,11 +386,11 @@
         body.position.set(data.x, data.y, data.z);
         body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), data.rotY);
       } else if (data.type === 'dice') {
-        mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.2 }));
+        // 주사위 6개 면 텍스처 적용
+        mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), createDiceMaterials());
         body = new CANNON.Body({ mass: 0.5, shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)), material: boardMaterial });
         body.position.set(data.x, data.y, data.z);
       } else if (data.type === 'figure') {
-        // 체스 말 피규어
         const group = new THREE.Group();
         const baseMat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 });
         const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.3, 16), baseMat);
@@ -366,14 +399,13 @@
         base.castShadow = true; head.castShadow = true;
         group.add(base); group.add(head);
 
-        // Raycasting 감지를 위해 자식 요소에 id 부여
         base.userData = { id: data.id };
         head.userData = { id: data.id };
 
         mesh = group;
         body = new CANNON.Body({ mass: 0.4, shape: new CANNON.Cylinder(0.5, 0.6, 0.8, 16), material: boardMaterial });
         body.position.set(data.x, data.y, data.z);
-      } else { // 토큰 / 말
+      } else {
         mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.2, 32), new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.3 }));
         body = new CANNON.Body({ mass: 0.2, shape: new CANNON.Cylinder(0.6, 0.6, 0.2, 16), material: boardMaterial });
         body.position.set(data.x, data.y, data.z);
@@ -387,14 +419,7 @@
       objects[data.id] = { mesh, body };
     }
 
-    // 소켓 수신
-    socket.on('init-game-mode', (data) => {
-      currentGame = data.game;
-      clearAll();
-      const diceBtn = document.getElementById('dice-btn');
-      diceBtn.style.display = (currentGame === 'dice') ? 'block' : 'none';
-    });
-
+    // 소켓 이벤트
     socket.on('init-physics-objects', (data) => {
       clearAll();
       Object.values(data).forEach(createPiece);
@@ -412,20 +437,23 @@
     });
 
     socket.on('roll-dice-action', () => {
+      let diceFound = false;
       Object.values(objects).forEach(obj => {
         if (obj.mesh.userData && obj.mesh.userData.type === 'dice') {
           obj.body.velocity.set((Math.random() - 0.5) * 8, 7 + Math.random() * 5, (Math.random() - 0.5) * 8);
           obj.body.angularVelocity.set(Math.random() * 12, Math.random() * 12, Math.random() * 12);
+          diceFound = true;
         }
       });
-      showToast('🎲 주사위를 던졌습니다!');
+      if (diceFound) showToast('🎲 주사위를 던졌습니다!');
+      else showToast('보드판에 주사위가 없습니다. 먼저 추가해 주세요!');
     });
 
     socket.on('flip-card-action', (data) => {
       if (flyingCards[data.id]) flyingCards[data.id].flip();
     });
 
-    // ===== 5. 터치 및 Raycasting 오버랩 드래그 로직 =====
+    // ===== 6. 터치 및 Raycasting 오버랩 제어 =====
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
     let lastTouchPos = new THREE.Vector2();
@@ -451,7 +479,7 @@
 
       raycaster.setFromCamera(touchPos, camera);
 
-      // 1) 플라잉 카드 검사
+      // 카드의 레이캐스팅
       const cardMeshes = Object.values(flyingCards).map(c => c.mesh);
       const cardIntersects = raycaster.intersectObjects(cardMeshes);
 
@@ -470,10 +498,9 @@
         return;
       }
 
-      // 2) 3D 기물 및 피규어/주사위/토큰 검사
+      // 기물 및 피규어/주사위의 레이캐스팅
       if (isCameraMode) return;
-      
-      // Group 피규어 등 모든 자식 메쉬까지 씬 전체에서 오버랩 검사
+
       const allMeshes = [];
       Object.values(objects).forEach(o => {
         if (o.mesh.isGroup) {
@@ -513,8 +540,7 @@
         if (selectedObject.body) {
           const dx = (touchPos.x - lastTouchPos.x) * 12;
           const dy = (touchPos.y - lastTouchPos.y) * 12;
-          
-          // 충격량으로 보드 상에서 부드럽게 밀어서 이동
+
           selectedObject.body.applyImpulse(new CANNON.Vec3(dx, 0, -dy), selectedObject.body.position);
 
           const b = selectedObject.body;
@@ -540,15 +566,15 @@
       selectedObject = null;
     });
 
-    // UI 버튼 이벤트
+    // UI 모달 및 소품 추가 액션
     let isCameraMode = false;
     document.getElementById('menu-btn').addEventListener('click', () => {
       const modal = document.getElementById('game-menu-modal');
       modal.style.display = modal.style.display === 'block' ? 'none' : 'block';
     });
 
-    function selectGame(gameType) {
-      socket.emit('change-game', gameType);
+    function addObjects(type) {
+      socket.emit('add-objects', type);
       document.getElementById('game-menu-modal').style.display = 'none';
     }
 
