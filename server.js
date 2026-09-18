@@ -11,10 +11,9 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-let gameObjects = {}; // 보드판 위 전체 물체 관리
+let gameObjects = {};
 let cardCount = 0;
 
-// 젠가 18층 타워 생성
 function createJengaBlocks() {
   const blocks = {};
   const blockHeight = 0.6;
@@ -38,10 +37,8 @@ function createJengaBlocks() {
 }
 
 io.on('connection', (socket) => {
-  // 접속 시 현재 보드판 상태 전달 (초기엔 빈 상태)
   socket.emit('init-physics-objects', gameObjects);
 
-  // 메뉴 버튼 누를 때 보드판에 기물 추가/생성
   socket.on('add-objects', (type) => {
     if (type === 'clear') {
       gameObjects = {};
@@ -54,15 +51,17 @@ io.on('connection', (socket) => {
       gameObjects['token_yellow'] = { id: 'token_yellow', type: 'token', x: -1, y: 0.2, z: 1, color: 0xeab308 };
       gameObjects['token_green'] = { id: 'token_green', type: 'token', x: 1, y: 0.2, z: 1, color: 0x10b981 };
     } else if (type === 'cards') {
-      const suits = ['♠', '♥', '♦', '♣'];
-      const values = ['A', 'K', 'Q', 'J'];
+      const suits = ['♠', '♥', '♦', '♣', '♠', '♥', '♦', '♣'];
+      const values = ['A', '2', '7', 'J', 'Q', 'K', '3', '10'];
       for (let i = 0; i < 4; i++) {
         const id = `flying_card_${cardCount++}`;
+        const suit = suits[cardCount % suits.length];
+        const val = values[cardCount % values.length];
         gameObjects[id] = {
           id, type: 'flying_card',
-          x: -2.2 + i * 1.5, y: 0.05, z: 0,
-          suit: suits[i % 4], value: values[i % 4],
-          color: (suits[i % 4] === '♥' || suits[i % 4] === '♦') ? '#dc2626' : '#1e293b'
+          x: -2.2 + (i % 4) * 1.5, y: 0.05, z: 0,
+          suit: suit, value: val,
+          color: (suit === '♥' || suit === '♦') ? '#dc2626' : '#0f172a'
         };
       }
     } else if (type === 'jenga') {
@@ -72,7 +71,6 @@ io.on('connection', (socket) => {
     io.emit('init-physics-objects', gameObjects);
   });
 
-  // 물체 이동 위치 동기화
   socket.on('move-object', (data) => {
     if (gameObjects[data.id]) {
       Object.assign(gameObjects[data.id], data);
@@ -80,23 +78,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 주사위 굴리기 신호
   socket.on('roll-dice', () => {
     io.emit('roll-dice-action');
   });
 
-  // 카드 공중 Flip 신호
   socket.on('flip-card', (cardId) => {
     io.emit('flip-card-action', { id: cardId });
   });
 
-  // 판 전체 비우기
   socket.on('reset-game', () => {
     gameObjects = {};
     io.emit('init-physics-objects', gameObjects);
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`TTS 서버 실행 중: 포트 ${PORT}`);
-});
+server.listen(PORT, () => console.log(`TTS 서버 실행 중: 포트 ${PORT}`));
