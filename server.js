@@ -11,10 +11,10 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-let currentGame = 'onecard'; // 기본 게임
+let currentGame = 'classic';
 let gameObjects = {};
 
-// ===== 1. 젠가 18층(54개) 정밀 물리 블록 생성 =====
+// ===== 1. 젠가 생성 =====
 function createJengaBlocks() {
   const blocks = {};
   const blockHeight = 0.6;
@@ -27,41 +27,32 @@ function createJengaBlocks() {
     for (let i = 0; i < 3; i++) {
       const id = `jenga_${idCount++}`;
       const offset = (i - 1) * 1.05;
-
-      let x = 0, z = 0, rotY = 0;
-      if (isEven) {
-        x = 0; z = offset; rotY = 0;
-      } else {
-        x = offset; z = 0; rotY = Math.PI / 2;
-      }
-
       blocks[id] = {
         id, type: 'jenga_block',
-        x, y, z, rotX: 0, rotY, rotZ: 0, color: 0xd2b48c
+        x: isEven ? 0 : offset, y, z: isEven ? offset : 0,
+        rotY: isEven ? 0 : Math.PI / 2, color: 0xd2b48c
       };
     }
   }
   return blocks;
 }
 
-// ===== 2. 클래식 체크보드 기물 생성 =====
+// ===== 2. 클래식 체크보드 & 피규어/주사위 생성 =====
 function createClassicBoardObjects() {
   return {
-    dice1: { id: 'dice1', type: 'dice', x: -1, y: 1, z: 0, color: 0xffffff },
-    dice2: { id: 'dice2', type: 'dice', x: 1, y: 1, z: 0, color: 0xffffff },
-    red_cube: { id: 'red_cube', type: 'cube', x: -3, y: 0.5, z: -3, color: 0xef4444 },
-    red_token: { id: 'red_token', type: 'token', x: -3, y: 0.15, z: -1, color: 0xef4444 },
-    blue_cube: { id: 'blue_cube', type: 'cube', x: 3, y: 0.5, z: 3, color: 0x3b82f6 },
-    blue_token: { id: 'blue_token', type: 'token', x: 3, y: 0.15, z: 1, color: 0x3b82f6 },
-    yellow_token: { id: 'yellow_token', type: 'token', x: 0, y: 0.15, z: 0, color: 0xeab308 },
-    green_token: { id: 'green_token', type: 'token', x: 1, y: 0.15, z: -1, color: 0x10b981 }
+    dice1: { id: 'dice1', type: 'dice', x: -1.5, y: 1, z: 0, color: 0xffffff },
+    dice2: { id: 'dice2', type: 'dice', x: 1.5, y: 1, z: 0, color: 0xffffff },
+    figure_red: { id: 'figure_red', type: 'figure', x: -3, y: 0.6, z: -3, color: 0xef4444 },
+    figure_blue: { id: 'figure_blue', type: 'figure', x: 3, y: 0.6, z: 3, color: 0x3b82f6 },
+    token_yellow: { id: 'token_yellow', type: 'token', x: 0, y: 0.15, z: 0, color: 0xeab308 },
+    token_green: { id: 'token_green', type: 'token', x: 1, y: 0.15, z: -1, color: 0x10b981 }
   };
 }
 
-// ===== 3. 원카드 게임 로직 (공격스택, 턴방향, 특수능력) =====
+// ===== 3. 원카드 로직 (셔플 기능 지원) =====
 let players = [];
 let currentTurnIndex = 0;
-let turnDirection = 1; // 1: 시계방향, -1: 반시계방향
+let turnDirection = 1;
 let drawDeck = [];
 let discardPile = [];
 let playerHands = {};
@@ -79,11 +70,15 @@ function createDeck() {
       deck.push({ id: `card_${id++}`, suit: s, value: v, color });
     }
   }
-  for (let i = deck.length - 1; i > 0; i--) {
+  return shuffleArray(deck);
+}
+
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
-  return deck;
+  return arr;
 }
 
 function initOneCardGame() {
@@ -108,12 +103,8 @@ function initOneCardGame() {
   broadcastOneCardState();
 }
 
-function getTopDiscardCard() {
-  return discardPile[discardPile.length - 1];
-}
-
 function broadcastOneCardState() {
-  const topCard = getTopDiscardCard();
+  const topCard = discardPile[discardPile.length - 1];
   players.forEach((pId) => {
     io.to(pId).emit('update-onecard-state', {
       myHand: playerHands[pId] || [],
@@ -124,42 +115,29 @@ function broadcastOneCardState() {
   });
 }
 
-function nextTurn(step = 1) {
-  if (players.length === 0) return;
-  currentTurnIndex = (currentTurnIndex + step * turnDirection + players.length * 100) % players.length;
-}
+gameObjects = createClassicBoardObjects();
 
-// ===== 소켓 네트워크 핸들러 =====
 io.on('connection', (socket) => {
-  console.log('플레이어 접속:', socket.id);
   players.push(socket.id);
 
   socket.emit('init-game-mode', { game: currentGame });
-  if (currentGame === 'jenga' || currentGame === 'classic') {
+  if (currentGame !== 'onecard') {
     socket.emit('init-physics-objects', gameObjects);
-  } else if (currentGame === 'onecard') {
+  } else {
     if (Object.keys(playerHands).length === 0) initOneCardGame();
     else broadcastOneCardState();
   }
 
-  // 게임 메뉴 전환
   socket.on('change-game', (gameType) => {
     currentGame = gameType;
-    if (gameType === 'jenga') {
-      gameObjects = createJengaBlocks();
-      io.emit('init-game-mode', { game: 'jenga' });
-      io.emit('init-physics-objects', gameObjects);
-    } else if (gameType === 'classic') {
-      gameObjects = createClassicBoardObjects();
-      io.emit('init-game-mode', { game: 'classic' });
-      io.emit('init-physics-objects', gameObjects);
-    } else if (gameType === 'onecard') {
-      initOneCardGame();
-      io.emit('init-game-mode', { game: 'onecard' });
-    }
+    if (gameType === 'jenga') gameObjects = createJengaBlocks();
+    else if (gameType === 'classic') gameObjects = createClassicBoardObjects();
+    else if (gameType === 'onecard') initOneCardGame();
+
+    io.emit('init-game-mode', { game: gameType });
+    if (gameType !== 'onecard') io.emit('init-physics-objects', gameObjects);
   });
 
-  // 3D 물체 이동 수신
   socket.on('move-object', (data) => {
     if (gameObjects[data.id]) {
       Object.assign(gameObjects[data.id], data);
@@ -167,7 +145,20 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 원카드: 카드 내기
+  // 주사위 굴리기 신호 전파
+  socket.on('roll-dice', () => {
+    io.emit('roll-dice-action');
+  });
+
+  // 덱 셔플 신호 전파
+  socket.on('shuffle-deck', () => {
+    if (currentGame === 'onecard') {
+      drawDeck = shuffleArray(drawDeck);
+      io.emit('toast-message', { text: '🔀 덱을 깔끔하게 섞었습니다!' });
+      broadcastOneCardState();
+    }
+  });
+
   socket.on('play-card', (cardId) => {
     if (currentGame !== 'onecard' || players[currentTurnIndex] !== socket.id) return;
 
@@ -176,7 +167,7 @@ io.on('connection', (socket) => {
     if (cardIndex === -1) return;
 
     const card = hand[cardIndex];
-    const topCard = getTopDiscardCard();
+    const topCard = discardPile[discardPile.length - 1];
 
     let isValid = false;
     if (attackStack > 0) {
@@ -196,25 +187,23 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // 특수 카드 스킬
     let skipTurn = 1;
     if (card.value === '2') attackStack += 2;
     else if (card.value === 'A') attackStack += (card.suit === '♠' ? 5 : 3);
-    else if (card.value === 'J') skipTurn = 2; // 점프
-    else if (card.value === 'Q') turnDirection *= -1; // 방향 전환
-    else if (card.value === 'K') skipTurn = 0; // 한 번 더 내기
+    else if (card.value === 'J') skipTurn = 2;
+    else if (card.value === 'Q') turnDirection *= -1;
+    else if (card.value === 'K') skipTurn = 0;
 
-    nextTurn(skipTurn);
+    currentTurnIndex = (currentTurnIndex + skipTurn * turnDirection + players.length * 100) % players.length;
     broadcastOneCardState();
   });
 
-  // 원카드: 카드 드로우
   socket.on('draw-card', () => {
     if (currentGame !== 'onecard' || players[currentTurnIndex] !== socket.id) return;
 
     if (drawDeck.length === 0) {
       const top = discardPile.pop();
-      drawDeck = discardPile;
+      drawDeck = shuffleArray(discardPile);
       discardPile = [top];
     }
 
@@ -222,41 +211,27 @@ io.on('connection', (socket) => {
     attackStack = 0;
 
     for (let i = 0; i < drawCount; i++) {
-      if (drawDeck.length > 0) {
-        playerHands[socket.id].push(drawDeck.pop());
-      }
+      if (drawDeck.length > 0) playerHands[socket.id].push(drawDeck.pop());
     }
 
-    nextTurn(1);
+    currentTurnIndex = (currentTurnIndex + turnDirection + players.length * 100) % players.length;
     broadcastOneCardState();
   });
 
-  socket.on('shout-onecard', () => {
-    io.emit('toast-message', { text: `📢 플레이어가 [원카드!]를 외쳤습니다!` });
-  });
-
   socket.on('reset-game', () => {
-    if (currentGame === 'jenga') {
-      gameObjects = createJengaBlocks();
-      io.emit('init-physics-objects', gameObjects);
-    } else if (currentGame === 'classic') {
-      gameObjects = createClassicBoardObjects();
-      io.emit('init-physics-objects', gameObjects);
-    } else if (currentGame === 'onecard') {
-      initOneCardGame();
-    }
+    if (currentGame === 'jenga') gameObjects = createJengaBlocks();
+    else if (currentGame === 'classic') gameObjects = createClassicBoardObjects();
+    else if (currentGame === 'onecard') initOneCardGame();
+
+    if (currentGame !== 'onecard') io.emit('init-physics-objects', gameObjects);
   });
 
   socket.on('disconnect', () => {
     players = players.filter(id => id !== socket.id);
     delete playerHands[socket.id];
-    if (players.length > 0 && currentGame === 'onecard') {
-      currentTurnIndex = currentTurnIndex % players.length;
-      broadcastOneCardState();
-    }
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`TTS 통합 서버 실행 중: 포트 ${PORT}`);
+  console.log(`서버 실행 중: 포트 ${PORT}`);
 });
