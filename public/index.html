@@ -95,7 +95,7 @@
 
   <div id="help-panel">
     🖱️ <b>기물 이동 모드:</b> 젠가/주사위/카드 자유 드래그<br>
-    🎥 <b>카메라 모드:</b> 드래그하여 화면 각도 조절
+    👆 <b>카드 더블 터치 / 클릭:</b> 공중 앞뒤 3D Flip 뒤집기
   </div>
 
   <div id="toast"></div>
@@ -235,7 +235,7 @@
       return texture;
     }
 
-    // ===== 4. 안정화된 플라잉 카드 physics =====
+    // ===== 4. 앞뒤 회전 보정된 플라잉 카드 physics =====
     class FlyingCardPhysics {
       constructor(mesh, id) {
         this.mesh = mesh;
@@ -243,19 +243,23 @@
         this.isDragging = false;
         this.pos = new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z);
         this.velocity = new THREE.Vector2(0, 0);
-        this.baseRotY = 0;
+        
+        // 앞뒤 회전축: X축 기준 180도 뒤집기
+        this.baseRotX = 0;
         this.tiltRot = new THREE.Euler(0, 0, 0);
+        
         this.targetY = 0.8;
         this.isFlying = false;
         this.flyProgress = 0;
         this.flyDuration = 0.4;
         this.startPos = new THREE.Vector3();
         this.targetPos = new THREE.Vector3();
+        
         this.isFlipping = false;
         this.flipProgress = 0;
         this.flipDuration = 0.4;
-        this.startRotY = 0;
-        this.targetRotY = 0;
+        this.startRotX = 0;
+        this.targetRotX = 0;
       }
 
       onDragStart() { this.isDragging = true; this.isFlying = false; this.targetY = 0.8; }
@@ -274,25 +278,34 @@
         const throwZ = THREE.MathUtils.clamp(this.pos.z + this.velocity.z * 1.5, -6, 6);
         this.targetPos.set(throwX, 0.05, throwZ);
       }
+
+      // X축으로 앞뒤 180도 뒤집기
       flip() {
         if (this.isFlipping) return;
-        this.isFlipping = true; this.flipProgress = 0;
-        this.startRotY = this.baseRotY; this.targetRotY = this.baseRotY + Math.PI;
+        this.isFlipping = true; 
+        this.flipProgress = 0;
+        this.startRotX = this.baseRotX; 
+        this.targetRotX = this.baseRotX + Math.PI; // X축 180도 뒤집기
+
         if (!this.isDragging && !this.isFlying) {
-          this.isFlying = true; this.flyProgress = 0;
-          this.startPos.copy(this.pos); this.targetPos.copy(this.pos);
+          this.isFlying = true; 
+          this.flyProgress = 0;
+          this.startPos.copy(this.pos); 
+          this.targetPos.copy(this.pos);
         }
       }
+
       update(delta) {
         if (this.isFlipping) {
           this.flipProgress += delta / this.flipDuration;
           if (this.flipProgress >= 1) {
-            this.flipProgress = 1; this.isFlipping = false;
-            this.baseRotY = this.targetRotY % (Math.PI * 2);
+            this.flipProgress = 1; 
+            this.isFlipping = false;
+            this.baseRotX = this.targetRotX % (Math.PI * 2);
           }
           const t = this.flipProgress;
           const easeT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-          this.baseRotY = THREE.MathUtils.lerp(this.startRotY, this.targetRotY, easeT);
+          this.baseRotX = THREE.MathUtils.lerp(this.startRotX, this.targetRotX, easeT);
         }
 
         if (this.isDragging) {
@@ -317,7 +330,9 @@
         }
 
         this.mesh.position.copy(this.pos);
-        const qBase = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.baseRotY);
+
+        // X축 앞뒤 회전 쿼터니언 계산 적용
+        const qBase = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.baseRotX);
         const qTilt = new THREE.Quaternion().setFromEuler(this.tiltRot);
         this.mesh.quaternion.copy(qTilt.multiply(qBase));
       }
@@ -402,7 +417,7 @@
       objects[data.id] = { mesh, body };
     }
 
-    // 소켓 동기화
+    // 소켓 수신
     socket.on('init-physics-objects', (data) => {
       clearAll();
       Object.values(data).forEach(createPiece);
@@ -440,7 +455,7 @@
       if (flyingCards[data.id]) flyingCards[data.id].flip();
     });
 
-    // ===== 6. 카드 및 물체 드래그 오류 완벽 보정 =====
+    // ===== 6. Raycasting 오버랩 인터랙션 =====
     const raycaster = new THREE.Raycaster();
     const touchPos = new THREE.Vector2();
     let selectedObject = null;
@@ -455,7 +470,6 @@
       touchPos.y = -(y / window.innerHeight) * 2 + 1;
     }
 
-    // 카드 이동용 바닥 직교 평면
     const cardDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const planeIntersection = new THREE.Vector3();
 
@@ -466,7 +480,7 @@
       updateTouchPos(e);
       raycaster.setFromCamera(touchPos, camera);
 
-      // 1) 카드 검사
+      // 카드 레이캐스팅
       const cardMeshes = Object.values(flyingCards).map(c => c.mesh);
       const cardIntersects = raycaster.intersectObjects(cardMeshes);
 
@@ -485,7 +499,7 @@
         return;
       }
 
-      // 2) 젠가 및 기물 검사
+      // 기물 레이캐스팅
       const allMeshes = [];
       Object.values(objects).forEach(o => {
         if (o.mesh.isGroup) {
@@ -513,9 +527,8 @@
       updateTouchPos(e);
       raycaster.setFromCamera(touchPos, camera);
 
-      // 카드 이동 안전 처리
       if (selectedCard) {
-        cardDragPlane.constant = 0; // 테이블 수평면 기준 고정
+        cardDragPlane.constant = 0;
         if (raycaster.ray.intersectPlane(cardDragPlane, planeIntersection)) {
           if (!isNaN(planeIntersection.x) && !isNaN(planeIntersection.z)) {
             selectedCard.onDragMove(planeIntersection);
@@ -528,7 +541,6 @@
         return;
       }
 
-      // 젠가 및 일반 기물 이동
       if (selectedObject) {
         cardDragPlane.constant = -selectedObject.body.position.y;
         if (raycaster.ray.intersectPlane(cardDragPlane, planeIntersection)) {
