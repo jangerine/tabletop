@@ -2,352 +2,259 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Tabletop Simulator Style Full Physics & 3D Flip Card</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Virtual Tabletop Simulator</title>
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #0f172a;
-      touch-action: none; /* 모바일 스크롤 및 바운스 방지 */
-      user-select: none;
+    * { touch-action: none; user-select: none; box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #0f172a; font-family: sans-serif; }
+    #ui-container {
+      position: absolute; top: 12px; left: 12px; right: 12px;
+      display: flex; justify-content: space-between; z-index: 10; pointer-events: none;
     }
-    #info {
-      position: absolute;
-      top: 15px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 14px;
-      background: rgba(0, 0, 0, 0.75);
-      padding: 12px 24px;
-      border-radius: 20px;
-      pointer-events: none;
-      text-align: center;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-      line-height: 1.5;
+    .btn {
+      pointer-events: auto; background: #2563eb; color: white; border: none;
+      padding: 10px 14px; border-radius: 12px; font-weight: bold; cursor: pointer; margin-right: 4px;
     }
-    #info b {
-      color: #38bdf8;
+    #menu-modal {
+      display: none; position: absolute; top: 60px; left: 12px;
+      background: rgba(24, 24, 27, 0.95); padding: 16px; border-radius: 16px; z-index: 100; width: 200px;
+    }
+    .menu-item { display: block; width: 100%; padding: 10px; margin-bottom: 6px; background: #27272a; color: white; border: none; border-radius: 8px; cursor: pointer; text-align: left; }
+    #hand-container {
+      position: absolute; bottom: 12px; left: 0; right: 0; height: 120px;
+      display: none; justify-content: center; align-items: flex-end; padding: 0 16px; overflow-x: auto; z-index: 20;
+    }
+    .card-ui {
+      width: 60px; height: 90px; background: white; border-radius: 6px; margin: 0 -10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: inline-flex; flex-direction: column;
+      justify-content: space-between; padding: 6px; font-weight: bold; cursor: grab; flex-shrink: 0;
     }
   </style>
-  <!-- Three.js CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
-
-  <div id="info">
-    🖱️ <b>드래그:</b> 카드 이동 (관성 틸트 & 높이 들림)<br>
-    🍃 <b>드롭:</b> 손을 놓으면 속도 감쇄 및 포물선 착지<br>
-    👆 <b>더블 클릭 / 터치</b> 또는 <b>[F] 키:</b> 공중 3D Flip 뒤집기
+  <div id="ui-container">
+    <div>
+      <button class="btn" style="background:#8b5cf6;" onclick="toggleMenu()">🎮 게임 선택</button>
+      <button class="btn" style="background:#dc2626;" onclick="socket.emit('reset-game')">💥 판 초기화</button>
+    </div>
+    <button id="mode-btn" class="btn" onclick="toggleCameraMode()">카메라 회전 모드</button>
   </div>
 
+  <div id="menu-modal">
+    <h3 style="color:white; margin:0 0 10px 0;">게임 목록</h3>
+    <button class="menu-item" onclick="selectGame('jenga')">🪵 3D 젠가</button>
+    <button class="menu-item" onclick="selectGame('classic')">♟️ 클래식 보드</button>
+    <button class="menu-item" onclick="selectGame('onecard')">🃏 원카드</button>
+  </div>
+
+  <div id="hand-container"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
   <script>
-    // 1. 씬, 카메라, 렌더러 설정
+    const socket = io();
+
+    // 1. Three.js 설정
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f172a);
 
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, -7, 8);
-    camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 12, 14);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
 
-    // 2. 조명 설정
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableRotate = false;
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-    dirLight.position.set(5, -5, 10);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 1024;
-    dirLight.shadow.mapSize.height = 1024;
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 25;
-    scene.add(dirLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const light = new THREE.DirectionalLight(0xffffff, 0.8);
+    light.position.set(10, 20, 10);
+    light.castShadow = true;
+    scene.add(light);
 
-    // 3. 바닥 판 (Table Board)
-    const boardGeo = new THREE.PlaneGeometry(14, 10);
-    const boardMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
-    const board = new THREE.Mesh(boardGeo, boardMat);
-    board.receiveShadow = true;
-    scene.add(board);
+    // 테이블 바닥
+    const tableMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(14, 0.4, 14),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b })
+    );
+    tableMesh.position.y = -0.2;
+    tableMesh.receiveShadow = true;
+    scene.add(tableMesh);
 
-    // 4. 앞/뒷면 텍스처 생성 (Canvas 이용)
-    function createFrontTexture() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 384;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 384);
-      ctx.lineWidth = 10; ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(5, 5, 246, 374);
-      ctx.fillStyle = '#dc2626'; ctx.font = 'bold 44px sans-serif'; ctx.fillText('A', 20, 55);
-      ctx.font = 'bold 72px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('♠', 128, 210);
-      return new THREE.CanvasTexture(canvas);
+    // 2. Cannon.js 물리 엔진
+    const world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
+
+    const tableBody = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(7, 0.2, 7)) });
+    tableBody.position.set(0, -0.2, 0);
+    world.addBody(tableBody);
+
+    // 3. 게임 상태
+    let currentGame = 'jenga';
+    const objects = {};
+    let selectedObj = null;
+
+    function clearScene() {
+      Object.keys(objects).forEach(id => {
+        scene.remove(objects[id].mesh);
+        if (objects[id].body) world.remove(objects[id].body);
+        delete objects[id];
+      });
     }
 
-    function createBackTexture() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 384;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#b91c1c'; ctx.fillRect(0, 0, 256, 384);
-      ctx.lineWidth = 8; ctx.strokeStyle = '#ffffff'; ctx.strokeRect(8, 8, 240, 368);
-      ctx.fillStyle = '#991b1b';
-      for(let i=20; i<240; i+=20) {
-        for(let j=20; j<360; j+=20) {
-          ctx.fillRect(i, j, 10, 10);
-        }
+    function createObject(data) {
+      let geo, shape, mass = 0.3;
+      if (data.type === 'jenga_block') {
+        geo = new THREE.BoxGeometry(3, 0.6, 1);
+        shape = new CANNON.Box(new CANNON.Vec3(1.48, 0.29, 0.48));
+      } else if (data.type === 'dice') {
+        geo = new THREE.BoxGeometry(1, 1, 1);
+        shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
+      } else {
+        geo = new THREE.CylinderGeometry(0.6, 0.6, 0.3, 32);
+        shape = new CANNON.Cylinder(0.6, 0.6, 0.3, 16);
       }
-      return new THREE.CanvasTexture(canvas);
+
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: data.color }));
+      mesh.castShadow = true;
+      mesh.userData = { id: data.id };
+
+      const body = new CANNON.Body({ mass, shape });
+      body.position.set(data.x, data.y, data.z);
+      if (data.rotY) body.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), data.rotY);
+
+      world.addBody(body);
+      scene.add(mesh);
+      objects[data.id] = { mesh, body };
     }
 
-    // 5. 3D 카드 메쉬 생성
-    const cardGeo = new THREE.BoxGeometry(1.6, 2.4, 0.02);
-    const cardMat = [
-      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 우
-      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 좌
-      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 상
-      new THREE.MeshStandardMaterial({ color: 0xcccccc }), // 하
-      new THREE.MeshStandardMaterial({ map: createFrontTexture(), roughness: 0.3 }), // 앞면
-      new THREE.MeshStandardMaterial({ map: createBackTexture(), roughness: 0.3 })   // 뒷면
-    ];
-    const cardMesh = new THREE.Mesh(cardGeo, cardMat);
-    cardMesh.castShadow = true;
-    cardMesh.receiveShadow = true;
-    scene.add(cardMesh);
+    // 소켓 동기화
+    socket.on('init-game-mode', (data) => {
+      currentGame = data.game;
+      clearScene();
+      document.getElementById('hand-container').style.display = currentGame === 'onecard' ? 'flex' : 'none';
+    });
 
-    // 6. Flying Physics & 3D Flip 제어 클래스
-    class FlyingCardPhysics {
-      constructor(mesh) {
-        this.mesh = mesh;
-        this.isDragging = false;
-        
-        this.pos = new THREE.Vector3(0, 0, 0.01);
-        this.velocity = new THREE.Vector2(0, 0);
-        
-        // 회전 관리 (기본 상태 Y축 회전 + 이동 관성 틸트)
-        this.baseRotY = 0; // 0: 앞면, Math.PI: 뒷면
-        this.tiltRot = new THREE.Euler(0, 0, 0);
+    socket.on('init-objects', (data) => {
+      clearScene();
+      Object.values(data).forEach(createObject);
+    });
 
-        // 드롭 & 플라잉 착지 물리
-        this.targetZ = 0.01;
-        this.isFlying = false;
-        this.flyProgress = 0;
-        this.flyDuration = 0.45;
-        this.startPos = new THREE.Vector3();
-        this.targetPos = new THREE.Vector3();
-
-        // 3D Flip 애니메이션
-        this.isFlipping = false;
-        this.flipProgress = 0;
-        this.flipDuration = 0.4;
-        this.startRotY = 0;
-        this.targetRotY = 0;
-      }
-
-      onDragStart() {
-        this.isDragging = true;
-        this.isFlying = false;
-        this.targetZ = 1.2; // 드래그 시 카드를 공중으로 들어올림
-      }
-
-      onDragMove(targetWorldPos) {
-        if (!this.isDragging) return;
-
-        // 속도 측정 (관성 틸트 계산용)
-        this.velocity.x = targetWorldPos.x - this.pos.x;
-        this.velocity.y = targetWorldPos.y - this.pos.y;
-
-        this.pos.x = targetWorldPos.x;
-        this.pos.y = targetWorldPos.y;
-      }
-
-      onDragEnd() {
-        if (!this.isDragging) return;
-        this.isDragging = false;
-        this.isFlying = true;
-        this.flyProgress = 0;
-
-        this.startPos.copy(this.pos);
-        // 던진 속도 관성을 일부 반영하여 착지 지점 계산
-        const throwX = THREE.MathUtils.clamp(this.pos.x + this.velocity.x * 2.5, -6, 6);
-        const throwY = THREE.MathUtils.clamp(this.pos.y + this.velocity.y * 2.5, -4, 4);
-        
-        this.targetPos.set(throwX, throwY, 0.01);
-      }
-
-      // 3D Flip (공중 뒤집기) 발동
-      flip() {
-        if (this.isFlipping) return; // 이미 뒤집히는 중이면 중복 실행 방지
-        
-        this.isFlipping = true;
-        this.flipProgress = 0;
-        this.startRotY = this.baseRotY;
-        this.targetRotY = this.baseRotY + Math.PI; // 180도 회전
-
-        // 드래그 중이 아니거나 정지 상태일 때 Flip 시 포물선 점프 연출 유발
-        if (!this.isDragging && !this.isFlying) {
-          this.isFlying = true;
-          this.flyProgress = 0;
-          this.startPos.copy(this.pos);
-          this.targetPos.copy(this.pos);
-        }
-      }
-
-      update(delta) {
-        // --- [1] 3D Flip (뒤집기) 회전 연출 ---
-        if (this.isFlipping) {
-          this.flipProgress += delta / this.flipDuration;
-          if (this.flipProgress >= 1) {
-            this.flipProgress = 1;
-            this.isFlipping = false;
-            this.baseRotY = this.targetRotY % (Math.PI * 2);
-          }
-          // Ease-InOut 곡선으로 부드러운 회전
-          const t = this.flipProgress;
-          const easeT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-          this.baseRotY = THREE.MathUtils.lerp(this.startRotY, this.targetRotY, easeT);
-        }
-
-        // --- [2] 드래그 상태 물리 ---
-        if (this.isDragging) {
-          // Z축 높이 부드럽게 상승
-          this.pos.z += (this.targetZ - this.pos.z) * 0.2;
-
-          // 이동 속도에 비례한 관성 틸트 (기울어짐)
-          const targetTiltX = -this.velocity.y * 0.8;
-          const targetTiltY =  this.velocity.x * 0.8;
-          const targetTiltZ = -this.velocity.x * 0.3;
-
-          this.tiltRot.x += (targetTiltX - this.tiltRot.x) * 0.2;
-          this.tiltRot.y += (targetTiltY - this.tiltRot.y) * 0.2;
-          this.tiltRot.z += (targetTiltZ - this.tiltRot.z) * 0.2;
-
-          this.velocity.multiplyScalar(0.7); // 속도 감쇄
-        } 
-        // --- [3] 손을 놓았을 때 포물선 비행 & 착지 물리 ---
-        else if (this.isFlying) {
-          this.flyProgress += delta / this.flyDuration;
-          if (this.flyProgress >= 1) {
-            this.flyProgress = 1;
-            this.isFlying = false;
-          }
-
-          const t = this.flyProgress;
-          const easeT = 1 - Math.pow(1 - t, 3); // Ease-Out-Cubic
-
-          this.pos.x = THREE.MathUtils.lerp(this.startPos.x, this.targetPos.x, easeT);
-          this.pos.y = THREE.MathUtils.lerp(this.startPos.y, this.targetPos.y, easeT);
-
-          // 비행 피크 높이 (Flip 중일 때는 카드가 더 높게 뜸)
-          const peakHeight = this.isFlipping ? 1.8 : 0.8;
-          const arcHeight = Math.sin(t * Math.PI) * peakHeight;
-          this.pos.z = THREE.MathUtils.lerp(this.startPos.z, this.targetPos.z, easeT) + arcHeight;
-
-          // 착지 시 기울어짐 복원
-          this.tiltRot.x += (0 - this.tiltRot.x) * 0.2;
-          this.tiltRot.y += (0 - this.tiltRot.y) * 0.2;
-          this.tiltRot.z += (0 - this.tiltRot.z) * 0.2;
-        }
-
-        // 위치 적용
-        this.mesh.position.copy(this.pos);
-
-        // 기본 뒤집기 회전(Y축)과 드래그 관성 틸트를 결합한 쿼터니언 계산
-        const qBase = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.baseRotY);
-        const qTilt = new THREE.Quaternion().setFromEuler(this.tiltRot);
-        this.mesh.quaternion.copy(qTilt.multiply(qBase));
-      }
-    }
-
-    const cardPhysics = new FlyingCardPhysics(cardMesh);
-
-    // 7. 레이캐스팅 & 인터랙션 처리
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-    const planeIntersection = new THREE.Vector3();
-
-    let lastTapTime = 0; // 더블 터치/클릭 감지용
-
-    function getPointerPos(e) {
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      mouse.x = (clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-    }
-
-    function onPointerDown(e) {
-      getPointerPos(e);
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObject(cardMesh);
-
-      if (intersects.length > 0) {
-        const currentTime = new Date().getTime();
-        const tapLength = currentTime - lastTapTime;
-
-        // 300ms 이내 연속 클릭/터치 시 더블클릭 판정 -> 3D Flip 발동
-        if (tapLength < 300 && tapLength > 0) {
-          cardPhysics.flip();
-        } else {
-          cardPhysics.onDragStart();
-        }
-        lastTapTime = currentTime;
-      }
-    }
-
-    function onPointerMove(e) {
-      if (!cardPhysics.isDragging) return;
-      getPointerPos(e);
-      raycaster.setFromCamera(mouse, camera);
-
-      if (raycaster.ray.intersectPlane(dragPlane, planeIntersection)) {
-        cardPhysics.onDragMove(planeIntersection);
-      }
-    }
-
-    function onPointerUp() {
-      if (cardPhysics.isDragging) {
-        cardPhysics.onDragEnd();
-      }
-    }
-
-    // 키보드 'F' 키 입력으로 뒤집기
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'f' || e.key === 'F' || e.key === 'ㄹ') {
-        cardPhysics.flip();
+    socket.on('update-object', (data) => {
+      if (objects[data.id]) {
+        const b = objects[data.id].body;
+        b.position.set(data.x, data.y, data.z);
+        if (data.qx !== undefined) b.quaternion.set(data.qx, data.qy, data.qz, data.qw);
       }
     });
 
-    // 이벤트 리스너 등록
-    window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
+    socket.on('update-onecard-state', (data) => {
+      const handContainer = document.getElementById('hand-container');
+      handContainer.innerHTML = '';
+      data.myHand.forEach(card => {
+        const el = document.createElement('div');
+        el.className = 'card-ui';
+        el.style.color = card.color;
+        el.innerHTML = `<div>${card.value}</div><div style="text-align:center;font-size:20px;">${card.suit}</div>`;
+        el.onclick = () => socket.emit('play-card', card.id);
+        handContainer.appendChild(el);
+      });
+    });
+
+    // 4. 모바일/PC 통합 Raycasting 드래그
+    const raycaster = new THREE.Raycaster();
+    const touchPos = new THREE.Vector2();
+    let lastTouchPos = new THREE.Vector2();
+
+    function updateTouchPos(e) {
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+      touchPos.x = (x / window.innerWidth) * 2 - 1;
+      touchPos.y = -(y / window.innerHeight) * 2 + 1;
+    }
+
+    window.addEventListener('pointerdown', (e) => {
+      if (isCameraMode || e.target.closest('#ui-container') || e.target.closest('#hand-container')) return;
+      updateTouchPos(e);
+      lastTouchPos.copy(touchPos);
+
+      raycaster.setFromCamera(touchPos, camera);
+      const meshes = Object.values(objects).map(o => o.mesh);
+      const intersects = raycaster.intersectObjects(meshes);
+
+      if (intersects.length > 0) {
+        selectedObj = objects[intersects[0].object.userData.id];
+      }
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!selectedObj || isCameraMode) return;
+      updateTouchPos(e);
+
+      const dx = (touchPos.x - lastTouchPos.x) * 10;
+      const dy = (touchPos.y - lastTouchPos.y) * 10;
+      selectedObj.body.applyImpulse(new CANNON.Vec3(dx, 0, -dy), selectedObj.body.position);
+
+      const b = selectedObj.body;
+      socket.emit('move-object', {
+        id: selectedObj.mesh.userData.id,
+        x: b.position.x, y: b.position.y, z: b.position.z,
+        qx: b.quaternion.x, qy: b.quaternion.y, qz: b.quaternion.z, qw: b.quaternion.w
+      });
+
+      lastTouchPos.copy(touchPos);
+    });
+
+    window.addEventListener('pointerup', () => { selectedObj = null; });
+
+    // UI 모드 조작
+    let isCameraMode = false;
+    function toggleCameraMode() {
+      isCameraMode = !isCameraMode;
+      controls.enableRotate = isCameraMode;
+      const btn = document.getElementById('mode-btn');
+      btn.textContent = isCameraMode ? "물체 이동 모드" : "카메라 회전 모드";
+      btn.style.background = isCameraMode ? "#059669" : "#2563eb";
+    }
+
+    function toggleMenu() {
+      const m = document.getElementById('menu-modal');
+      m.style.display = m.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function selectGame(game) {
+      socket.emit('change-game', game);
+      toggleMenu();
+    }
+
+    // 5. 애니메이션 루프
+    function animate() {
+      requestAnimationFrame(animate);
+      if (currentGame !== 'onecard') {
+        world.step(1 / 60);
+        Object.values(objects).forEach(obj => {
+          if (obj.body) {
+            obj.mesh.position.copy(obj.body.position);
+            obj.mesh.quaternion.copy(obj.body.quaternion);
+          }
+        });
+      }
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
-
-    // 8. 메인 렌더 루프
-    const clock = new THREE.Clock();
-    function animate() {
-      requestAnimationFrame(animate);
-      const delta = clock.getDelta();
-
-      // 물리 업데이트 (관성, 드롭, 틸트, 3D Flip 결합)
-      cardPhysics.update(delta);
-
-      renderer.render(scene, camera);
-    }
-
-    animate();
   </script>
 </body>
 </html>
